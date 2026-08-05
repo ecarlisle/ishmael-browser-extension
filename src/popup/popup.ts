@@ -5,6 +5,7 @@ import './popup.css';
 import { isExtensionMessage, type ExtensionMessage } from '../shared/messages';
 import type { RedactedSettings } from '../shared/settings';
 import { createIdleStatus, type PlaybackStatus } from '../shared/playback';
+import { applyStatusTone, type StatusKind } from './status-tone';
 
 function byId<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -24,6 +25,8 @@ const elements = {
   speed: byId<HTMLInputElement>('speed'),
   speedValue: byId<HTMLOutputElement>('speed-value'),
   saveVoice: byId<HTMLButtonElement>('save-voice'),
+  voiceSettings: byId<HTMLDetailsElement>('voice-settings'),
+  settingsSummaryNote: byId<HTMLSpanElement>('settings-summary-note'),
   readPage: byId<HTMLButtonElement>('read-page'),
   readSelection: byId<HTMLButtonElement>('read-selection'),
   playPause: byId<HTMLButtonElement>('play-pause'),
@@ -38,12 +41,25 @@ function send<T>(message: ExtensionMessage): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
 }
 
-function setStatus(text: string): void {
+let statusKind: StatusKind | null = null;
+
+function setStatus(text: string, kind: StatusKind = 'info'): void {
+  statusKind = kind;
   elements.status.textContent = text;
+  elements.status.hidden = false;
+  applyStatusTone(elements.status, kind);
 }
 
 function showError(text: string): void {
-  elements.status.textContent = `Error: ${text}`;
+  setStatus(`Error: ${text}`, 'error');
+}
+
+/** Hides the status container so it does not consume popup space when empty. */
+function clearStatus(): void {
+  statusKind = null;
+  elements.status.textContent = '';
+  elements.status.hidden = true;
+  elements.status.classList.remove('status--error', 'status--success', 'status--info');
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +71,12 @@ function renderSettings(settings: RedactedSettings): void {
   elements.model.value = settings.model;
   elements.speed.value = String(settings.speed);
   elements.speedValue.value = `${settings.speed}×`;
+
+  // Keep Voice settings collapsed once the API key and reference ID are
+  // configured; open them automatically when either is missing.
+  const configured = settings.hasApiKey && settings.voiceId.trim().length > 0;
+  elements.voiceSettings.open = !configured;
+  elements.settingsSummaryNote.textContent = configured ? 'Configured — click to change' : 'Setup required';
 
   if (settings.hasApiKey) {
     elements.apiKey.placeholder = 'Key is saved — enter a new one to replace it';
@@ -104,9 +126,11 @@ function renderStatus(status: PlaybackStatus): void {
   if (status.phase === 'error' && status.error) {
     showError(status.error);
   } else if (status.phase === 'loading') {
-    setStatus('Preparing narration…');
-  } else if (status.phase === 'idle') {
-    // Keep previously shown transient messages visible until the next action.
+    setStatus('Preparing narration…', 'info');
+  } else if (statusKind === 'error') {
+    // A non-error state arrived after an error: do not leave the error
+    // visible once the action recovered or was superseded.
+    clearStatus();
   }
 }
 
@@ -126,7 +150,7 @@ async function readWithSource(source: 'page' | 'selection', label: string): Prom
       showError(response.error ?? 'Could not start narration.');
       return;
     }
-    setStatus('Narration started.');
+    setStatus('Narration started.', 'success');
   } catch {
     showError('Could not reach the extension. Reopen the popup and try again.');
   }
@@ -138,7 +162,7 @@ async function saveKey(): Promise<void> {
   try {
     await send({ target: 'service-worker', type: 'SAVE_SETTINGS', patch: { apiKey } });
     elements.apiKey.value = '';
-    setStatus('API key saved.');
+    setStatus('API key saved.', 'success');
     await refreshSettings();
   } catch {
     showError('Could not save the API key. Try again.');
@@ -148,7 +172,7 @@ async function saveKey(): Promise<void> {
 async function removeKey(): Promise<void> {
   try {
     await send({ target: 'service-worker', type: 'REMOVE_API_KEY' });
-    setStatus('API key removed.');
+    setStatus('API key removed.', 'success');
     await refreshSettings();
   } catch {
     showError('Could not remove the API key. Try again.');
@@ -167,7 +191,7 @@ async function saveVoice(): Promise<void> {
       type: 'SAVE_SETTINGS',
       patch: { voiceId, model: elements.model.value as RedactedSettings['model'] },
     });
-    setStatus('Voice settings saved.');
+    setStatus('Voice settings saved.', 'success');
   } catch {
     showError('Could not save the voice settings. Try again.');
   }
@@ -178,6 +202,7 @@ async function applySpeed(): Promise<void> {
   elements.speedValue.value = `${speed.toFixed(1)}×`;
   try {
     await send({ target: 'service-worker', type: 'SAVE_SETTINGS', patch: { speed } });
+    setStatus('Narration speed saved.', 'success');
   } catch {
     showError('Could not save the narration speed. Try again.');
   }
@@ -186,6 +211,7 @@ async function applySpeed(): Promise<void> {
 async function control(type: 'PLAY_PAUSE' | 'PREVIOUS' | 'NEXT' | 'STOP'): Promise<void> {
   try {
     await send({ target: 'service-worker', type });
+    clearStatus();
   } catch {
     showError('Could not reach the extension. Try again.');
   }

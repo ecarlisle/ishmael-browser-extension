@@ -12,70 +12,6 @@
         <p class="popup__tagline">The web, read aloud.</p>
       </header>
 
-      <section class="card" aria-labelledby="settings-heading">
-        <h2 id="settings-heading">Voice settings</h2>
-
-        <div class="field">
-          <label for="api-key">Fish Audio API key</label>
-          <div class="row">
-            <input
-              id="api-key"
-              type="password"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="Paste your API key"
-              aria-describedby="api-key-hint"
-            />
-            <button id="save-key" type="button">Save key</button>
-          </div>
-          <p id="api-key-hint" class="hint">
-            Stored in this browser's local extension storage. Not sent to content scripts or any server except Fish Audio.
-          </p>
-          <p id="key-state" class="key-state" role="status"></p>
-          <div id="key-actions" class="row" hidden>
-            <button id="replace-key" type="button">Replace key</button>
-            <button id="remove-key" type="button" class="danger">Remove key</button>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="voice-id">Voice / reference ID</label>
-          <input
-            id="voice-id"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="Paste a Fish Audio voice ID"
-            aria-describedby="voice-id-hint"
-          />
-          <p id="voice-id-hint" class="hint">
-            A public Fish Audio voice-library ID, or the model ID of a voice you are authorized to use.
-            Fish Audio validates the ID when you start reading.
-          </p>
-        </div>
-
-        <div class="field">
-          <label for="model">Model</label>
-          <select id="model">
-            <option value="s2.1-pro-free">s2.1-pro-free (free tier)</option>
-            <option value="s2.1-pro">s2.1-pro</option>
-            <option value="s2-pro">s2-pro</option>
-            <option value="s1">s1</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <div class="speed-label">
-            <label for="speed">Speed</label>
-            <output id="speed-value" for="speed">1.0×</output>
-          </div>
-          <input id="speed" type="range" min="0.5" max="2" step="0.1" value="1" aria-describedby="speed-hint" />
-          <p id="speed-hint" class="hint">Applied instantly to current and upcoming audio via the browser's playback rate.</p>
-        </div>
-
-        <button id="save-voice" type="button" class="primary">Save voice settings</button>
-      </section>
-
       <section class="card" aria-labelledby="listen-heading">
         <h2 id="listen-heading">Listen</h2>
         <div class="row">
@@ -91,7 +27,75 @@
         <p id="segment-info" class="segment-info" aria-live="polite">No active session</p>
       </section>
 
-      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+
+      <details id="voice-settings" class="card card--collapsible">
+        <summary>
+          <h2 id="settings-heading">Voice settings</h2>
+          <span id="settings-summary-note" class="summary-note">Setup required</span>
+        </summary>
+        <div class="settings-body">
+          <div class="field">
+            <label for="api-key">Fish Audio API key</label>
+            <div class="row">
+              <input
+                id="api-key"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Paste your API key"
+                aria-describedby="api-key-hint"
+              />
+              <button id="save-key" type="button">Save key</button>
+            </div>
+            <p id="api-key-hint" class="hint">
+              Stored in this browser's local extension storage. Not sent to content scripts or any server except Fish Audio.
+            </p>
+            <p id="key-state" class="key-state" role="status"></p>
+            <div id="key-actions" class="row" hidden>
+              <button id="replace-key" type="button">Replace key</button>
+              <button id="remove-key" type="button" class="danger">Remove key</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="voice-id">Voice / reference ID</label>
+            <input
+              id="voice-id"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Paste a Fish Audio voice ID"
+              aria-describedby="voice-id-hint"
+            />
+            <p id="voice-id-hint" class="hint">
+              A public Fish Audio voice-library ID, or the model ID of a voice you are authorized to use.
+              Fish Audio validates the ID when you start reading.
+            </p>
+          </div>
+
+          <div class="field">
+            <label for="model">Model</label>
+            <select id="model">
+              <option value="s2.1-pro-free">s2.1-pro-free (free tier)</option>
+              <option value="s2.1-pro">s2.1-pro</option>
+              <option value="s2-pro">s2-pro</option>
+              <option value="s1">s1</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <div class="speed-label">
+              <label for="speed">Speed</label>
+              <output id="speed-value" for="speed">1.0×</output>
+            </div>
+            <input id="speed" type="range" min="0.5" max="2" step="0.1" value="1" aria-describedby="speed-hint" />
+            <p id="speed-hint" class="hint">Applied instantly to current and upcoming audio via the browser's playback rate.</p>
+          </div>
+
+          <button id="save-voice" type="button" class="primary">Save voice settings</button>
+        </div>
+      </details>
 
       <footer class="popup__footer">
         <p class="privacy-note">

@@ -15,7 +15,8 @@ import {
   type SettingsStorage,
 } from '../shared/settings-storage';
 import { messageForKind } from '../shared/errors';
-import { sendStartReading } from './start-reading';
+import { startOffscreenSession } from './start-reading';
+import { sourceForCommand } from './commands';
 
 const OFFSCREEN_URL = 'offscreen.html';
 const STATUS_CACHE_KEY = 'ishmael.playbackStatus';
@@ -32,6 +33,10 @@ function init(): void {
   });
   chrome.runtime.onStartup.addListener(() => {
     void restrictStorageAccess();
+  });
+
+  chrome.commands.onCommand.addListener((command: string) => {
+    void handleShortcut(command);
   });
 
   chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
@@ -179,14 +184,18 @@ export async function beginReading(source: 'page' | 'selection'): Promise<Simple
   try {
     await ensureOffscreenDocument();
   } catch {
-    return { ok: false, error: 'Could not start background playback. Reload the extension and try again.' };
+    return {
+      ok: false,
+      error: 'Could not create the background audio page. Check the service worker console, then reload the extension.',
+    };
   }
 
   // Do not report success merely because the offscreen document was created:
-  // wait for the controller to acknowledge that it received and accepted the
-  // narration session (one bounded retry for the race right after document
-  // creation). The loading state is only cached once the session is accepted.
-  const started = await sendStartReading(
+  // poll it with PING until its controller answers PONG (bounded backoff for
+  // the race where createDocument resolves before the listener registers),
+  // then send START_READING and require a validated acknowledgement. The
+  // loading state is only cached once the session is accepted.
+  const started = await startOffscreenSession(
     {
       target: 'offscreen',
       type: 'START_READING',
@@ -211,6 +220,24 @@ async function ensureOffscreenDocument(): Promise<void> {
     reasons: [chrome.offscreen.Reason.AUDIO_PLAYBACK],
     justification: 'Play Fish Audio narration continuously while the popup is closed or the tab is switched.',
   });
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts
+// ---------------------------------------------------------------------------
+
+/**
+ * Routes a manifest command to the same beginReading() flow used by the
+ * popup buttons. When a shortcut fails while the popup is closed, stores an
+ * error playback status so the next popup open explains what happened.
+ */
+async function handleShortcut(command: string): Promise<void> {
+  const source = sourceForCommand(command);
+  if (!source) return; // unknown commands are ignored
+  const result = await beginReading(source);
+  if (result.ok) return;
+  const cached = await readCachedStatus();
+  await cacheStatus({ phase: 'error', index: 0, total: 0, speed: cached.speed, error: result.error });
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +268,10 @@ async function readCachedStatus(): Promise<PlaybackStatus> {
  */
 async function getFreshStatus(): Promise<PlaybackStatus> {
   const cached = await readCachedStatus();
-  if (cached.phase === 'idle') return cached;
+  // Idle and error statuses are terminal display information: return them
+  // as-is instead of letting a PING failure overwrite a stored error (e.g. a
+  // shortcut failure that happened while the popup was closed).
+  if (cached.phase === 'idle' || cached.phase === 'error') return cached;
   const pong = await withTimeout(forwardToOffscreen({ target: 'offscreen', type: 'PING' }), 600, null);
   if (isPongResponse(pong)) {
     const status = sanitizePlaybackStatus(pong.status);

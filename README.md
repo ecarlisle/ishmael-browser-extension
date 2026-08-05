@@ -24,6 +24,9 @@ analytics, no hosted backend, no voice cloning, no cloud history.
 8. Switch tabs or close the popup — playback continues in a background
    offscreen document.
 9. See the current segment number and a concise, live status/error message.
+10. Use the keyboard shortcuts **Alt+Shift+R** (read page) and **Alt+Shift+S**
+    (read selection) — even with the popup closed; see
+    [Keyboard shortcuts](#keyboard-shortcuts).
 
 ## Current prototype limitations
 
@@ -93,6 +96,83 @@ pnpm typecheck
 4. Click **Load unpacked**.
 5. Select the `dist/` directory in this repository.
 6. Pin the extension to the toolbar and click its icon to open the popup.
+
+## Load in Brave
+
+Brave loads unpacked extensions the same way as Chrome:
+
+1. Run `pnpm build`.
+2. Open `brave://extensions` and enable **Developer mode**.
+3. Click **Load unpacked** and select the `dist/` directory.
+4. After every rebuild, click the extension's reload button (circular arrow)
+   at `brave://extensions`, or remove and re-add it.
+
+## Keyboard shortcuts
+
+Ishmael registers two manifest commands that reuse the exact same startup flow
+as the popup buttons, so they work with the popup closed:
+
+- **Alt+Shift+R** — read the current page aloud
+- **Alt+Shift+S** — read the current text selection aloud
+
+The same defaults apply on macOS (Option+Shift+R / Option+Shift+S). Customize
+them, or fix conflicts with other extensions, at:
+
+- Brave: `brave://extensions/shortcuts`
+- Chrome: `chrome://extensions/shortcuts`
+
+If a browser reserves one of the defaults for itself, assign an available
+combination there — the command stays registered and routes through the same
+handshake.
+
+## Popup layout
+
+The popup is ordered: header/tagline → **Listen** card (Read page, Read
+selection, transport controls, segment status) → status line → collapsible
+**Voice settings** → privacy note. Voice settings use a native disclosure
+(`<details>/<summary>`): they start collapsed when an API key and reference ID
+are already saved, and open automatically when either is missing. Click
+**Voice settings** to expand and edit them at any time.
+
+## Troubleshooting: "Background audio did not start"
+
+**Root cause.** Creating the offscreen audio document resolves as soon as the
+page exists — before its script has finished loading and registered its
+message listener. Messages sent in that window fail with "Receiving end does
+not exist." This is most visible right after reloading the extension (or on a
+cold start), because the offscreen document is recreated from scratch each
+time. The failure happens **before any Fish Audio request is made**: the
+narration session itself never reached the audio controller.
+
+**Fix (already implemented).** The service worker now runs a readiness
+handshake before starting narration:
+
+1. It polls the offscreen document with `PING` until it answers `PONG`
+   (bounded, roughly two seconds), tolerating "no receiving end" responses
+   while the document warms up.
+2. Only then does it send `START_READING`, and it requires a validated
+   acknowledgement before reporting success.
+
+The popup shows a distinct, actionable message for each failure stage:
+
+- *"Background audio did not become ready…"* — the document never answered
+  `PING` within the budget.
+- *"Background audio did not start…"* — the document was ready but never
+  acknowledged (or rejected) `START_READING`.
+- Controller rejections (for example "No API key saved.") are passed through
+  unchanged.
+
+**If you still see an error, in this order:**
+
+1. `brave://extensions` or `chrome://extensions` → find Ishmael → **Inspect
+   views** → **service worker** → open the console and look for "Receiving end
+does not exist" or other errors.
+2. **Inspect views** → the offscreen document (`offscreen.html`) → open its
+   console and confirm `offscreen.js` loaded without exceptions.
+3. Confirm `dist/offscreen.html` and `dist/offscreen.js` both exist after
+   `pnpm build`.
+4. Reload the extension and retry. If it still fails, the console output from
+   steps 1–2 is the information to report.
 
 ## Create a Fish Audio API key
 
@@ -164,6 +244,16 @@ settings handling. Extension runtime behavior is best verified manually:
 12. Start and stop narration repeatedly, and rapidly press **Next** several
     times: no duplicate Fish requests should be sent for the same text segment
     (at most one in-flight request per chunk).
+13. Press **Alt+Shift+R** / **Alt+Shift+S** with the popup closed: narration
+    starts through the same path as the popup buttons. Assign a different
+    shortcut if a browser conflicts at `chrome://extensions/shortcuts` or
+    `brave://extensions/shortcuts`.
+14. Reload the extension (or restart the browser) and immediately press
+    **Alt+Shift+R**: the startup handshake should wait out the offscreen warm-up
+    and start narration instead of failing with "Receiving end does not exist."
+15. With the popup closed, make a shortcut fail (for example remove the API
+    key first): reopen the popup and confirm it explains the failure instead
+    of silently showing no session.
 
 ## Privacy and API-key limitations
 
@@ -222,7 +312,9 @@ messages; the content script never sees the API key.
 | Path | Purpose |
 | --- | --- |
 | `index.html`, `src/popup/popup.ts`, `src/popup/popup.css` | Popup UI |
-| `src/background/service-worker.ts`, `src/background/start-reading.ts` | MV3 service worker + START_READING acknowledgement |
+| `src/popup/status-tone.ts` | Status → tone/ARIA-role mapping for popup status text |
+| `src/background/service-worker.ts`, `src/background/start-reading.ts` | MV3 service worker + offscreen readiness handshake and START_READING acknowledgement |
+| `src/background/commands.ts` | Keyboard-command → narration-source mapping |
 | `src/content/extract.ts`, `src/content/extract-core.ts` | Content script + pure extraction logic |
 | `src/offscreen/audio.ts`, `src/offscreen/audio-core.ts` | Offscreen audio controller + pure helpers (request shaping, in-flight registry, URL cache) |
 | `src/shared/messages.ts` | Message contract + validators |
