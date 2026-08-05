@@ -2,7 +2,8 @@
 //
 // The storage area is injected so unit tests can use a fake without touching
 // browser APIs. The API key is only ever read by trusted extension contexts
-// (service worker and offscreen document).
+// (service worker and offscreen document). All keys are namespaced under
+// `ishmael.` so they read clearly in storage inspection.
 
 import { redactSettings, sanitizeSettings, type RedactedSettings, type Settings } from './settings';
 
@@ -12,11 +13,16 @@ export interface SettingsStorage {
   remove(keys: readonly string[]): Promise<void>;
 }
 
-const STORAGE_KEYS = ['apiKey', 'voiceId', 'model', 'speed'] as const;
+const KEY_PREFIX = 'ishmael.';
+const SETTING_KEYS = ['apiKey', 'voiceId', 'model', 'speed'] as const;
 
 export async function loadSettings(storage: SettingsStorage): Promise<Settings> {
-  const raw = await storage.get(STORAGE_KEYS);
-  return sanitizeSettings(raw);
+  const raw = await storage.get(SETTING_KEYS.map((key) => `${KEY_PREFIX}${key}`));
+  const normalized: Record<string, unknown> = {};
+  for (const key of SETTING_KEYS) {
+    normalized[key] = raw[`${KEY_PREFIX}${key}`];
+  }
+  return sanitizeSettings(normalized);
 }
 
 export async function loadRedactedSettings(storage: SettingsStorage): Promise<RedactedSettings> {
@@ -27,14 +33,14 @@ export async function saveSettings(storage: SettingsStorage, patch: Partial<Sett
   const current = await loadSettings(storage);
   const merged = sanitizeSettings({ ...current, ...patch });
   await storage.set({
-    apiKey: merged.apiKey,
-    voiceId: merged.voiceId,
-    model: merged.model,
-    speed: merged.speed,
+    [`${KEY_PREFIX}apiKey`]: merged.apiKey,
+    [`${KEY_PREFIX}voiceId`]: merged.voiceId,
+    [`${KEY_PREFIX}model`]: merged.model,
+    [`${KEY_PREFIX}speed`]: merged.speed,
   });
   return merged;
 }
 
 export async function removeApiKey(storage: SettingsStorage): Promise<void> {
-  await storage.remove(['apiKey']);
+  await storage.remove([`${KEY_PREFIX}apiKey`]);
 }

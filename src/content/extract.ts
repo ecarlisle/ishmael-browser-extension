@@ -7,7 +7,7 @@
 import { extractFromDocument, extractSelectionFromDocument } from './extract-core';
 import { isExtensionMessage } from '../shared/messages';
 
-const LOADED_KEY = '__reader_content_loaded__';
+const LOADED_KEY = '__ishmael_content_loaded__';
 
 // The script can be injected multiple times (one executeScript call per
 // "Read" click); guard so we only register the listener once per page.

@@ -1,9 +1,14 @@
-# Reader
+# Ishmael
 
-A personal Chrome extension that extracts the meaningful content of the current
-webpage and reads it aloud using the [Fish Audio](https://fish.audio) text-to-speech API.
+Ishmael is a personal Chrome extension that extracts the meaningful content of
+the current webpage and reads it aloud using the
+[Fish Audio](https://fish.audio) text-to-speech API.
 
-Reader is an intentionally focused prototype: no accounts, no payments, no
+> Why the name? Ishmael is the narrator of Herman Melville's *Moby-Dick* — an
+> apt namesake for something that reads aloud — and the whaling voyage gives a
+> playful nod to Fish Audio.
+
+Ishmael is an intentionally focused prototype: no accounts, no payments, no
 analytics, no hosted backend, no voice cloning, no cloud history.
 
 ## What it does
@@ -107,7 +112,7 @@ only to Fish Audio's API as a `Bearer` token.
 3. Paste it into the popup's **Voice / reference ID** field, pick a model
    (default `s2.1-pro-free`), and click **Save voice settings**.
 
-Reader sends the request to Fish Audio's TTS endpoint using the request shape
+Ishmael sends the request to Fish Audio's TTS endpoint using the request shape
 from the [official documentation](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech):
 `POST https://api.fish.audio/v1/tts` with an `Authorization: Bearer` header, a
 `model` header, and a JSON body containing `text`, `reference_id`, `format: "mp3"`,
@@ -148,7 +153,7 @@ settings handling. Extension runtime behavior is best verified manually:
   convenient but **not equivalent to a secure backend**: anyone with access to
   your Chrome profile could read it. Avoid narrating sensitive pages with a
   third-party service.
-- Reader keeps no narration history. Audio caching is temporary and in-memory
+- Ishmael keeps no narration history. Audio caching is temporary and in-memory
   (a small window around the current segment) and is released when narration
   stops.
 - The extension requests only the permissions it needs: `activeTab`,

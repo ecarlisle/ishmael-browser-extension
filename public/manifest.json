@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Reader",
+  "name": "Ishmael",
   "version": "1.0.0",
-  "description": "Extract the meaningful content of the current page and read it aloud using Fish Audio text-to-speech.",
+  "description": "A natural-voice reader for the web, powered by Fish Audio.",
   "permissions": ["activeTab", "scripting", "storage", "offscreen"],
   "host_permissions": ["https://api.fish.audio/*"],
   "background": {
@@ -11,7 +11,7 @@
   },
   "action": {
     "default_popup": "index.html",
-    "default_title": "Reader",
+    "default_title": "Ishmael",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

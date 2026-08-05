@@ -2,7 +2,9 @@
 
 ## Purpose
 
-This repository contains a personal Chrome extension that extracts meaningful webpage content and reads it aloud using the Fish Audio text-to-speech API.
+This repository contains Ishmael, a personal Chrome extension that extracts
+meaningful webpage content and reads it aloud using the Fish Audio text-to-speech
+API.
 
 The current goal is a focused, understandable personal prototype. Prefer the smallest complete implementation that satisfies the documented requirements.
 

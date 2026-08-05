@@ -1,8 +1,8 @@
 {
-  "name": "reader",
+  "name": "ishmael",
   "version": "1.0.0",
   "private": true,
-  "description": "Extract the meaningful content of the current page and read it aloud using Fish Audio text-to-speech.",
+  "description": "A natural-voice reader for the web, powered by Fish Audio.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",

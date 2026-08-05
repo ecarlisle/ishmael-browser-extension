@@ -45,21 +45,28 @@ describe('settings storage', () => {
   });
 
   it('sanitizes junk stored directly in storage', async () => {
-    const storage = fakeStorage({ speed: 99, model: 'bogus' });
+    const storage = fakeStorage({ 'ishmael.speed': 99, 'ishmael.model': 'bogus' });
     const loaded = await loadSettings(storage);
     expect(loaded.speed).toBe(2);
     expect(loaded.model).toBe('s2.1-pro-free');
   });
 
+  it('stores settings under the ishmael.* key namespace', async () => {
+    const storage = fakeStorage();
+    await saveSettings(storage, { voiceId: 'v' });
+    expect(storage.data).toHaveProperty('ishmael.voiceId', 'v');
+    expect(storage.data).not.toHaveProperty('voiceId');
+  });
+
   it('removeApiKey removes only the api key', async () => {
-    const storage = fakeStorage({ apiKey: 'k', voiceId: 'v' });
+    const storage = fakeStorage({ 'ishmael.apiKey': 'k', 'ishmael.voiceId': 'v' });
     await removeApiKey(storage);
-    expect(storage.data).not.toHaveProperty('apiKey');
-    expect(storage.data).toHaveProperty('voiceId', 'v');
+    expect(storage.data).not.toHaveProperty('ishmael.apiKey');
+    expect(storage.data).toHaveProperty('ishmael.voiceId', 'v');
   });
 
   it('loadRedactedSettings hides the key value', async () => {
-    const storage = fakeStorage({ apiKey: 'top-secret', voiceId: 'v' });
+    const storage = fakeStorage({ 'ishmael.apiKey': 'top-secret', 'ishmael.voiceId': 'v' });
     const redacted = await loadRedactedSettings(storage);
     expect(redacted).toEqual({ hasApiKey: true, voiceId: 'v', model: 's2.1-pro-free', speed: 1 });
     expect(JSON.stringify(redacted)).not.toContain('top-secret');

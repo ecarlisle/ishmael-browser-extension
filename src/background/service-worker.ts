@@ -17,7 +17,7 @@ import {
 import { messageForKind } from '../shared/errors';
 
 const OFFSCREEN_URL = 'offscreen.html';
-const STATUS_CACHE_KEY = 'playbackStatus';
+const STATUS_CACHE_KEY = 'ishmael.playbackStatus';
 
 const localStorageArea: SettingsStorage = chrome.storage.local as unknown as SettingsStorage;
 
