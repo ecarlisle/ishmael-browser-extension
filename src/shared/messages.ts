@@ -119,3 +119,17 @@ export function isPongResponse(value: unknown): value is PongResponse {
   if (!isRecord(value)) return false;
   return value.type === 'PONG' && sanitizePlaybackStatus(value.status) !== null;
 }
+
+/**
+ * Acknowledgement sent by the offscreen controller for START_READING. Success
+ * means the controller accepted the narration session, so the service worker
+ * can safely cache a loading state; failure carries a concise, redacted,
+ * user-facing error.
+ */
+export type StartReadingAck = { ok: true } | { ok: false; error: string };
+
+export function isStartReadingAck(value: unknown): value is StartReadingAck {
+  if (!isRecord(value)) return false;
+  if (value.ok === true) return true;
+  return value.ok === false && typeof value.error === 'string' && value.error.length > 0;
+}

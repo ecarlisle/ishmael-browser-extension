@@ -18,11 +18,19 @@ import type { PlaybackStatus } from '../shared/playback';
 import { loadSettings, type SettingsStorage } from '../shared/settings-storage';
 import { clampSpeed } from '../shared/settings';
 import type { NarrationSegment } from '../shared/segments';
+import {
+  applyPlaybackRate,
+  buildTtsRequestBody,
+  buildTtsRequestHeaders,
+  ChunkFetchRegistry,
+  ObjectUrlCache,
+  TTS_ENDPOINT,
+} from './audio-core';
 
 const localStorageArea: SettingsStorage = chrome.storage.local as unknown as SettingsStorage;
 
-const TTS_ENDPOINT = 'https://api.fish.audio/v1/tts';
 const MAX_FETCH_RETRIES = 2;
+const RETRY_DELAY_BASE_MS = 500;
 
 const audio = new Audio();
 audio.preload = 'auto';
@@ -39,13 +47,14 @@ let errorMessage: string | undefined;
 
 /** Incremented whenever a session starts or stops; stale async work checks it. */
 let sessionId = 0;
-const activeFetches = new Set<AbortController>();
+/** At most one Fish request per chunk index, shared by prefetch and load. */
+const inflight = new ChunkFetchRegistry();
 
 /** The chunk currently being fetched (-1 when none). A seek supersedes it. */
 let pendingIndex = -1;
 
 /** index → object URL, bounded to a few chunks around the current one. */
-const urlCache = new Map<number, string>();
+const urlCache = new ObjectUrlCache();
 
 let shouldBePlaying = false;
 
@@ -70,28 +79,37 @@ function reportStatus(): void {
 // Fetching
 // ---------------------------------------------------------------------------
 
-async function fetchChunk(chunk: NarrationChunk, attempt = 0): Promise<Blob> {
-  const controller = new AbortController();
-  activeFetches.add(controller);
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Fetches one narration chunk from Fish Audio. A single AbortController is
+ * shared across retries so a session reset cancels the whole sequence. The
+ * user's narration speed is never sent to Fish: `prosody.speed` stays 1 and
+ * playback speed is applied via `audio.playbackRate` only.
+ */
+async function fetchChunk(chunk: NarrationChunk, controller: AbortController, attempt = 0): Promise<Blob> {
   try {
     const response = await fetch(TTS_ENDPOINT, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        model,
-      },
-      body: JSON.stringify({
-        text: chunk.text,
-        reference_id: voiceId,
-        format: 'mp3',
-        normalize: true,
-        prosody: {
-          speed,
-          volume: 0,
-          normalize_loudness: true,
-        },
-      }),
+      headers: buildTtsRequestHeaders(apiKey, model),
+      body: JSON.stringify(buildTtsRequestBody(chunk.text, voiceId)),
       signal: controller.signal,
     });
 
@@ -111,13 +129,26 @@ async function fetchChunk(chunk: NarrationChunk, attempt = 0): Promise<Blob> {
     // Explicit Fish Audio HTTP errors are not retried so rate limits and
     // balance errors surface immediately.
     if (!isAbortError(error) && !(error instanceof FishAudioError) && attempt < MAX_FETCH_RETRIES) {
-      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-      return fetchChunk(chunk, attempt + 1);
+      await abortableDelay(RETRY_DELAY_BASE_MS * (attempt + 1), controller.signal);
+      return fetchChunk(chunk, controller, attempt + 1);
     }
     throw error;
-  } finally {
-    activeFetches.delete(controller);
   }
+}
+
+/**
+ * Returns the shared in-flight fetch for `chunkIndex` (starting one if
+ * needed), or null when the index is out of range. Prefetch and foreground
+ * loading both go through here so the same text is never requested twice.
+ */
+function pendingFetchFor(chunkIndex: number): { promise: Promise<Blob>; controller: AbortController } | null {
+  const chunk = queue[chunkIndex];
+  if (!chunk) return null;
+  const controller = new AbortController();
+  return inflight.getOrStart(chunkIndex, () => ({
+    promise: fetchChunk(chunk, controller),
+    controller,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -125,17 +156,7 @@ async function fetchChunk(chunk: NarrationChunk, attempt = 0): Promise<Blob> {
 // ---------------------------------------------------------------------------
 
 function pruneUrlCache(): void {
-  for (const [cachedIndex, url] of urlCache) {
-    if (cachedIndex < index - 1 || cachedIndex > index + 1) {
-      URL.revokeObjectURL(url);
-      urlCache.delete(cachedIndex);
-    }
-  }
-}
-
-function clearUrlCache(): void {
-  for (const url of urlCache.values()) URL.revokeObjectURL(url);
-  urlCache.clear();
+  urlCache.prune(index - 1, index + 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -161,14 +182,14 @@ function finish(): void {
 /** Tear down the current session: cancel fetches, release audio and URLs. */
 function resetSession(): void {
   sessionId += 1;
-  abortAllFetches();
+  inflight.abortAll();
   shouldBePlaying = false;
   pendingIndex = -1;
   phase = 'idle';
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
-  clearUrlCache();
+  urlCache.clear();
   queue = [];
   index = 0;
   errorMessage = undefined;
@@ -178,7 +199,7 @@ function attachAndPlay(chunkIndex: number, url: string, playAfter = true): void 
   index = chunkIndex;
   pendingIndex = -1;
   audio.src = url;
-  audio.playbackRate = speed;
+  applyPlaybackRate(audio, speed);
   errorMessage = undefined;
   pruneUrlCache();
   if (playAfter) {
@@ -220,16 +241,21 @@ async function loadChunk(chunkIndex: number, playAfter = true): Promise<void> {
   errorMessage = undefined;
   reportStatus();
 
+  const pending = pendingFetchFor(chunkIndex);
+  if (!pending) {
+    finish();
+    return;
+  }
   try {
-    const blob = await fetchChunk(chunk);
+    const blob = await pending.promise;
     if (mySession !== sessionId) return; // superseded by stop/start
     if (pendingIndex !== chunkIndex) {
       // Superseded by a user seek while this chunk was fetching; the blob is
-      // simply discarded (garbage collected).
+      // simply discarded (garbage collected). A prefetch sharing this request
+      // caches the URL for later.
       return;
     }
-    const url = URL.createObjectURL(blob);
-    urlCache.set(chunkIndex, url);
+    const url = urlCache.getOrCreate(chunkIndex, blob);
     attachAndPlay(chunkIndex, url, playAfter);
     prefetch(chunkIndex + 1, mySession);
   } catch (error) {
@@ -243,15 +269,17 @@ async function loadChunk(chunkIndex: number, playAfter = true): Promise<void> {
 async function prefetch(chunkIndex: number, mySession: number): Promise<void> {
   const chunk = queue[chunkIndex];
   if (!chunk || urlCache.has(chunkIndex) || mySession !== sessionId) return;
+  const pending = pendingFetchFor(chunkIndex);
+  if (!pending) return;
   try {
-    const blob = await fetchChunk(chunk);
+    const blob = await pending.promise;
     if (mySession !== sessionId) return;
-    const url = URL.createObjectURL(blob);
-    urlCache.set(chunkIndex, url);
+    urlCache.getOrCreate(chunkIndex, blob);
     pruneUrlCache();
   } catch {
     // Prefetch failures are non-fatal: the chunk is fetched on demand when
-    // playback reaches it.
+    // playback reaches it. If a foreground load shares this request, it
+    // reports the failure.
   }
 }
 
@@ -327,14 +355,8 @@ function stop(): void {
 }
 
 function setSpeed(newSpeed: number): void {
-  speed = clampSpeed(newSpeed);
-  audio.playbackRate = speed;
+  speed = applyPlaybackRate(audio, newSpeed);
   reportStatus();
-}
-
-function abortAllFetches(): void {
-  for (const controller of activeFetches) controller.abort();
-  activeFetches.clear();
 }
 
 audio.addEventListener('ended', () => {
@@ -356,9 +378,18 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   if (!isExtensionMessage(message) || message.target !== 'offscreen') return false;
   switch (message.type) {
     case 'START_READING':
-      void startReading(message.segments, message.voiceId, message.model, message.speed);
-      sendResponse({ ok: true });
-      break;
+      // Acknowledge only after the session has been accepted so the service
+      // worker never reports success for a request that was never received.
+      // Exactly one response is sent.
+      void (async () => {
+        try {
+          await startReading(message.segments, message.voiceId, message.model, message.speed);
+          sendResponse({ ok: true });
+        } catch {
+          sendResponse({ ok: false, error: messageForKind('unknown') });
+        }
+      })();
+      return true; // response is sent asynchronously
     case 'PLAY_PAUSE':
       togglePlayPause();
       sendResponse({ ok: true });

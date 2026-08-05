@@ -48,7 +48,10 @@
             placeholder="Paste a Fish Audio voice ID"
             aria-describedby="voice-id-hint"
           />
-          <p id="voice-id-hint" class="hint">Find this in Fish Audio's VoiceLab after creating a voice from reference audio.</p>
+          <p id="voice-id-hint" class="hint">
+            A public Fish Audio voice-library ID, or the model ID of a voice you are authorized to use.
+            Fish Audio validates the ID when you start reading.
+          </p>
         </div>
 
         <div class="field">
@@ -67,7 +70,7 @@
             <output id="speed-value" for="speed">1.0×</output>
           </div>
           <input id="speed" type="range" min="0.5" max="2" step="0.1" value="1" aria-describedby="speed-hint" />
-          <p id="speed-hint" class="hint">Applies to new narration immediately.</p>
+          <p id="speed-hint" class="hint">Applied instantly to current and upcoming audio via the browser's playback rate.</p>
         </div>
 
         <button id="save-voice" type="button" class="primary">Save voice settings</button>

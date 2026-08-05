@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isExtensionMessage, isExtractionResult, isPongResponse } from './messages';
+import { isExtensionMessage, isExtractionResult, isPongResponse, isStartReadingAck } from './messages';
 import { createIdleStatus } from './playback';
 
 const validSegment = { id: 'p-1', kind: 'paragraph', text: 'Hello.' };
@@ -67,5 +67,20 @@ describe('isPongResponse', () => {
     expect(isPongResponse({ type: 'PONG', status: createIdleStatus() })).toBe(true);
     expect(isPongResponse({ type: 'PONG', status: { phase: 'bogus' } })).toBe(false);
     expect(isPongResponse({ type: 'OTHER' })).toBe(false);
+  });
+});
+
+describe('isStartReadingAck', () => {
+  it('accepts success and failure acknowledgements', () => {
+    expect(isStartReadingAck({ ok: true })).toBe(true);
+    expect(isStartReadingAck({ ok: false, error: 'No API key saved.' })).toBe(true);
+  });
+
+  it('rejects malformed acknowledgements', () => {
+    expect(isStartReadingAck({ ok: 'yes' })).toBe(false);
+    expect(isStartReadingAck({ ok: false, error: '' })).toBe(false);
+    expect(isStartReadingAck({ ok: true, extra: 1 })).toBe(true);
+    expect(isStartReadingAck(null)).toBe(false);
+    expect(isStartReadingAck({})).toBe(false);
   });
 });

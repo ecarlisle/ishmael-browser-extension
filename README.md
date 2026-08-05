@@ -19,7 +19,8 @@ analytics, no hosted backend, no voice cloning, no cloud history.
 4. Click **Read page** or **Read selection**.
 5. Listen with a natural Fish Audio voice.
 6. Play, pause, resume, stop, and move to the previous or next text segment.
-7. Adjust narration speed (applies immediately to new narration).
+7. Adjust narration speed — applied instantly through the browser's playback
+   rate to current and upcoming audio.
 8. Switch tabs or close the popup — playback continues in a background
    offscreen document.
 9. See the current segment number and a concise, live status/error message.
@@ -106,17 +107,29 @@ only to Fish Audio's API as a `Bearer` token.
 
 ## Obtain and enter a Fish voice/reference ID
 
-1. In Fish Audio, create a voice from reference audio (VoiceLab → create model;
-   see the [models overview](https://docs.fish.audio/developer-guide/models-pricing/models-overview)).
-2. Copy the resulting model/voice ID.
-3. Paste it into the popup's **Voice / reference ID** field, pick a model
-   (default `s2.1-pro-free`), and click **Save voice settings**.
+The popup's **Voice / reference ID** field accepts either:
+
+- A public voice ID from the [Fish Audio voice library](https://fish.audio/voices)
+  — no cloning or VoiceLab model needed — or
+- The model/reference ID of a voice you are authorized to use (for example a
+  voice you created from reference audio in VoiceLab; see the
+  [models overview](https://docs.fish.audio/developer-guide/models-pricing/models-overview)).
+
+Paste the ID into the field, pick a model (default `s2.1-pro-free`), and click
+**Save voice settings**. Ishmael does not browse or pre-validate the voice
+library: Fish Audio validates the ID when narration starts, and a rejected ID
+produces a clear, actionable error. The reference ID is sent to Fish Audio as
+`reference_id` in the request body; it is never used as the API key or as the
+`model` header.
 
 Ishmael sends the request to Fish Audio's TTS endpoint using the request shape
 from the [official documentation](https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech):
 `POST https://api.fish.audio/v1/tts` with an `Authorization: Bearer` header, a
 `model` header, and a JSON body containing `text`, `reference_id`, `format: "mp3"`,
 `normalize`, and a `prosody` object (`speed`, `volume`, `normalize_loudness`).
+`prosody.speed` is always `1`: narration speed is controlled solely by the
+browser's audio `playbackRate` (0.5×–2×), so the two mechanisms never
+compound.
 
 ## Manual verification steps
 
@@ -142,8 +155,15 @@ settings handling. Extension runtime behavior is best verified manually:
 9. Check the extension's service worker console (`chrome://extensions` →
    *inspect views* → *service worker*) for errors while reading. Errors should
    never contain your API key or the full article text.
-10. Verify playback speed changes apply immediately to new narration when you
-    move the speed slider.
+10. Move the speed slider and verify 0.5×, 1×, and 2× playback apply
+    immediately to current and upcoming audio, and never sound compounded
+    (Fish `prosody.speed` is pinned to 1).
+11. Open a page with a hidden nested subtree followed by visible content (for
+    example a `<section>` whose last child is `hidden`, followed by a visible
+    `<p>`): the later visible content must still be narrated.
+12. Start and stop narration repeatedly, and rapidly press **Next** several
+    times: no duplicate Fish requests should be sent for the same text segment
+    (at most one in-flight request per chunk).
 
 ## Privacy and API-key limitations
 
@@ -202,9 +222,9 @@ messages; the content script never sees the API key.
 | Path | Purpose |
 | --- | --- |
 | `index.html`, `src/popup/popup.ts`, `src/popup/popup.css` | Popup UI |
-| `src/background/service-worker.ts` | MV3 service worker |
+| `src/background/service-worker.ts`, `src/background/start-reading.ts` | MV3 service worker + START_READING acknowledgement |
 | `src/content/extract.ts`, `src/content/extract-core.ts` | Content script + pure extraction logic |
-| `src/offscreen/audio.ts` | Offscreen audio controller |
+| `src/offscreen/audio.ts`, `src/offscreen/audio-core.ts` | Offscreen audio controller + pure helpers (request shaping, in-flight registry, URL cache) |
 | `src/shared/messages.ts` | Message contract + validators |
 | `src/shared/segments.ts`, `src/shared/normalize.ts` | Segment types, dedupe, normalization |
 | `src/shared/chunking.ts` | Sentence-aware chunking |

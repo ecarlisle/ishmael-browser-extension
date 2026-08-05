@@ -7,7 +7,7 @@
 
 import { redactSettings, sanitizeSettings, type RedactedSettings, type Settings } from './settings';
 
-export interface SettingsStorage {
+export type SettingsStorage = {
   get(keys: readonly string[]): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
   remove(keys: readonly string[]): Promise<void>;

@@ -15,6 +15,7 @@ import {
   type SettingsStorage,
 } from '../shared/settings-storage';
 import { messageForKind } from '../shared/errors';
+import { sendStartReading } from './start-reading';
 
 const OFFSCREEN_URL = 'offscreen.html';
 const STATUS_CACHE_KEY = 'ishmael.playbackStatus';
@@ -142,7 +143,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   });
 }
 
-async function beginReading(source: 'page' | 'selection'): Promise<SimpleResponse> {
+export async function beginReading(source: 'page' | 'selection'): Promise<SimpleResponse> {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
   if (!tab?.id || !tab.url) {
@@ -180,14 +181,25 @@ async function beginReading(source: 'page' | 'selection'): Promise<SimpleRespons
   } catch {
     return { ok: false, error: 'Could not start background playback. Reload the extension and try again.' };
   }
-  await forwardToOffscreen({
-    target: 'offscreen',
-    type: 'START_READING',
-    segments: response.segments,
-    voiceId: settings.voiceId,
-    model: settings.model,
-    speed: settings.speed,
-  });
+
+  // Do not report success merely because the offscreen document was created:
+  // wait for the controller to acknowledge that it received and accepted the
+  // narration session (one bounded retry for the race right after document
+  // creation). The loading state is only cached once the session is accepted.
+  const started = await sendStartReading(
+    {
+      target: 'offscreen',
+      type: 'START_READING',
+      segments: response.segments,
+      voiceId: settings.voiceId,
+      model: settings.model,
+      speed: settings.speed,
+    },
+    (message) => forwardToOffscreen(message),
+  );
+  if (!started.ok) {
+    return { ok: false, error: started.error };
+  }
   await cacheStatus({ phase: 'loading', index: 0, total: response.segments.length, speed: settings.speed });
   return { ok: true };
 }
