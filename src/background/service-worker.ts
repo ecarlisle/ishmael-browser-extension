@@ -15,11 +15,16 @@ import {
   type SettingsStorage,
 } from '../shared/settings-storage';
 import { messageForKind } from '../shared/errors';
-import { startOffscreenSession } from './start-reading';
+import { startOffscreenSession, type SendOutcome } from './start-reading';
 import { sourceForCommand } from './commands';
 
 const OFFSCREEN_URL = 'offscreen.html';
 const STATUS_CACHE_KEY = 'ishmael.playbackStatus';
+
+const OFFSCREEN_CREATE_FAILED_MESSAGE =
+  'Could not create the background audio page. Check the service worker console, then reload the extension.';
+const OFFSCREEN_CONTEXT_MISSING_MESSAGE =
+  'The background audio page could not be found. Reload the extension and try again.';
 
 const localStorageArea: SettingsStorage = chrome.storage.local as unknown as SettingsStorage;
 
@@ -88,6 +93,18 @@ async function handleMessage(message: ExtensionMessage, sendResponse: (response:
       sendResponse({ ok: true });
       return;
     }
+    case 'GET_API_KEY': {
+      // The key is delivered only as a unicast response to the requesting
+      // offscreen document; it is never part of a broadcast payload, never
+      // cached in playback status, and never logged.
+      const settings = await loadSettings(localStorageArea);
+      if (!settings.apiKey) {
+        sendResponse({ ok: false, error: messageForKind('missing-api-key') });
+      } else {
+        sendResponse({ ok: true, apiKey: settings.apiKey });
+      }
+      return;
+    }
     case 'GET_STATUS': {
       sendResponse({ status: await getFreshStatus() });
       return;
@@ -115,12 +132,17 @@ async function handleMessage(message: ExtensionMessage, sendResponse: (response:
   }
 }
 
-/** Sends a message to the offscreen document if it exists. Never throws. */
-async function forwardToOffscreen(message: ExtensionMessage): Promise<unknown> {
+/**
+ * Sends a message to the offscreen document. Never throws: delivery failures
+ * are retained as a safe diagnostic tag (no message contents, credentials,
+ * or text) so callers can distinguish "no receiver" from other stages.
+ */
+async function forwardToOffscreen(message: ExtensionMessage): Promise<SendOutcome> {
   try {
-    return await chrome.runtime.sendMessage(message);
+    return { ok: true, value: await chrome.runtime.sendMessage(message) };
   } catch {
-    return undefined;
+    // runtime.sendMessage rejected: no listener was reachable.
+    return { ok: false, problem: 'no-receiver' };
   }
 }
 
@@ -183,18 +205,20 @@ export async function beginReading(source: 'page' | 'selection'): Promise<Simple
 
   try {
     await ensureOffscreenDocument();
-  } catch {
+  } catch (error) {
+    const problem = error instanceof OffscreenDocumentError ? error.problem : 'create-failed';
+    logOffscreenProblem(problem);
     return {
       ok: false,
-      error: 'Could not create the background audio page. Check the service worker console, then reload the extension.',
+      error: problem === 'no-context' ? OFFSCREEN_CONTEXT_MISSING_MESSAGE : OFFSCREEN_CREATE_FAILED_MESSAGE,
     };
   }
 
-  // Do not report success merely because the offscreen document was created:
-  // poll it with PING until its controller answers PONG (bounded backoff for
-  // the race where createDocument resolves before the listener registers),
-  // then send START_READING and require a validated acknowledgement. The
-  // loading state is only cached once the session is accepted.
+  // PING the controller until it answers PONG (bounded backoff): this
+  // verifies the controller actually initialized and registered its listener
+  // — a controller whose startup code threw can never be messaged — then send
+  // START_READING and require a validated acknowledgement. The loading state
+  // is only cached once the session is accepted.
   const started = await startOffscreenSession(
     {
       target: 'offscreen',
@@ -207,19 +231,70 @@ export async function beginReading(source: 'page' | 'selection'): Promise<Simple
     (message) => forwardToOffscreen(message),
   );
   if (!started.ok) {
+    logOffscreenProblem(started.problem);
     return { ok: false, error: started.error };
   }
   await cacheStatus({ phase: 'loading', index: 0, total: response.segments.length, speed: settings.speed });
   return { ok: true };
 }
 
+class OffscreenDocumentError extends Error {
+  constructor(readonly problem: 'create-failed' | 'no-context') {
+    super(`offscreen document ${problem}`);
+  }
+}
+
+/**
+ * Module-level creation promise: prevents concurrent createDocument() calls.
+ */
+let creatingOffscreenDocument: Promise<void> | undefined;
+
+/**
+ * Ensures the offscreen document exists, following Chrome's documented
+ * lifecycle pattern: `runtime.getContexts()` with the exact offscreen URL is
+ * checked first (Chrome 116+; `offscreen.hasDocument()` is Chrome 150+), and
+ * creation is guarded by a shared module-level promise. Throws
+ * `OffscreenDocumentError` with a distinct problem tag on failure.
+ */
 async function ensureOffscreenDocument(): Promise<void> {
-  if (await chrome.offscreen.hasDocument()) return;
-  await chrome.offscreen.createDocument({
-    url: OFFSCREEN_URL,
-    reasons: [chrome.offscreen.Reason.AUDIO_PLAYBACK],
-    justification: 'Play Fish Audio narration continuously while the popup is closed or the tab is switched.',
-  });
+  const offscreenUrl = chrome.runtime.getURL(OFFSCREEN_URL);
+  const hasContext = async (): Promise<boolean> => {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+      documentUrls: [offscreenUrl],
+    });
+    return contexts.length > 0;
+  };
+  if (await hasContext()) return;
+  if (creatingOffscreenDocument) {
+    await creatingOffscreenDocument;
+    return;
+  }
+  const creating = chrome.offscreen
+    .createDocument({
+      url: OFFSCREEN_URL,
+      reasons: [chrome.offscreen.Reason.AUDIO_PLAYBACK],
+      justification: 'Play Fish Audio narration continuously while the popup is closed or the tab is switched.',
+    })
+    .then(() => undefined);
+  creatingOffscreenDocument = creating;
+  try {
+    await creating;
+    if (!(await hasContext())) throw new OffscreenDocumentError('no-context');
+  } catch (error) {
+    if (error instanceof OffscreenDocumentError) throw error;
+    throw new OffscreenDocumentError('create-failed');
+  } finally {
+    if (creatingOffscreenDocument === creating) creatingOffscreenDocument = undefined;
+  }
+}
+
+/**
+ * Logs a safe, technical-only offscreen startup diagnostic. Never logs
+ * message contents, the API key, narration text, or request headers.
+ */
+function logOffscreenProblem(problem: string): void {
+  console.warn('[ishmael] offscreen startup failed', { problem });
 }
 
 // ---------------------------------------------------------------------------
@@ -272,9 +347,9 @@ async function getFreshStatus(): Promise<PlaybackStatus> {
   // as-is instead of letting a PING failure overwrite a stored error (e.g. a
   // shortcut failure that happened while the popup was closed).
   if (cached.phase === 'idle' || cached.phase === 'error') return cached;
-  const pong = await withTimeout(forwardToOffscreen({ target: 'offscreen', type: 'PING' }), 600, null);
-  if (isPongResponse(pong)) {
-    const status = sanitizePlaybackStatus(pong.status);
+  const outcome = await withTimeout(forwardToOffscreen({ target: 'offscreen', type: 'PING' }), 600, null);
+  if (outcome && outcome.ok && isPongResponse(outcome.value)) {
+    const status = sanitizePlaybackStatus(outcome.value.status);
     if (status) {
       await cacheStatus(status);
       return status;

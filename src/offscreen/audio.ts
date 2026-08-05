@@ -2,11 +2,15 @@
 // queue, and the <audio> element. Keeps playing while the popup is closed or
 // the user switches tabs.
 //
-// The API key is read from chrome.storage.local only — never from a message —
-// and never leaves this trusted extension context.
+// Offscreen documents support only the chrome.runtime extension API (per the
+// Chrome docs), so this controller uses no other chrome.* namespace — in
+// particular no chrome.storage. The Fish Audio API key is delivered over
+// runtime messaging as the unicast response to a GET_API_KEY request sent to
+// the service worker; it never travels inside a broadcast message, is never
+// stored or logged, and never leaves this trusted extension context.
 
 import { chunkSegments, type NarrationChunk } from '../shared/chunking';
-import { isExtensionMessage } from '../shared/messages';
+import { isApiKeyResponse, isExtensionMessage, type StartReadingAck } from '../shared/messages';
 import {
   FishAudioError,
   fishErrorFromUnknown,
@@ -15,7 +19,6 @@ import {
   parseFishErrorBody,
 } from '../shared/errors';
 import type { PlaybackStatus } from '../shared/playback';
-import { loadSettings, type SettingsStorage } from '../shared/settings-storage';
 import { clampSpeed } from '../shared/settings';
 import type { NarrationSegment } from '../shared/segments';
 import {
@@ -26,8 +29,6 @@ import {
   ObjectUrlCache,
   TTS_ENDPOINT,
 } from './audio-core';
-
-const localStorageArea: SettingsStorage = chrome.storage.local as unknown as SettingsStorage;
 
 const MAX_FETCH_RETRIES = 2;
 const RETRY_DELAY_BASE_MS = 500;
@@ -284,24 +285,50 @@ async function prefetch(chunkIndex: number, mySession: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// API key
+// ---------------------------------------------------------------------------
+
+/**
+ * Requests the Fish Audio API key from the service worker. The key arrives as
+ * a unicast runtime-message response addressed to this offscreen document;
+ * the broadcast request payload carries no secret. Never logs or stores the
+ * key.
+ */
+async function requestApiKey(): Promise<{ ok: true; apiKey: string } | { ok: false; error: string }> {
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({
+      target: 'service-worker',
+      type: 'GET_API_KEY',
+    });
+    return isApiKeyResponse(response) ? response : { ok: false, error: messageForKind('unknown') };
+  } catch {
+    return { ok: false, error: messageForKind('unknown') };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Message handlers
 // ---------------------------------------------------------------------------
 
+/**
+ * Starts a new narration session. Returns the acknowledgement that the
+ * service worker validates before caching any loading state.
+ */
 async function startReading(
   segments: readonly NarrationSegment[],
   voiceIdFromMessage: string,
   modelFromMessage: string,
   speedFromMessage: number,
-): Promise<void> {
+): Promise<StartReadingAck> {
   // Stop and dispose of any previous session first.
   resetSession();
 
-  const settings = await loadSettings(localStorageArea);
-  if (!settings.apiKey) {
-    fail(messageForKind('missing-api-key'));
-    return;
+  const keyResult = await requestApiKey();
+  if (!keyResult.ok) {
+    fail(keyResult.error);
+    return { ok: false, error: keyResult.error };
   }
-  apiKey = settings.apiKey;
+  apiKey = keyResult.apiKey;
   voiceId = voiceIdFromMessage;
   model = modelFromMessage;
   speed = clampSpeed(speedFromMessage);
@@ -309,9 +336,10 @@ async function startReading(
   queue = chunkSegments(segments);
   if (queue.length === 0) {
     reportStatus();
-    return;
+    return { ok: true };
   }
   void loadChunk(0);
+  return { ok: true };
 }
 
 function togglePlayPause(): void {
@@ -383,8 +411,8 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
       // Exactly one response is sent.
       void (async () => {
         try {
-          await startReading(message.segments, message.voiceId, message.model, message.speed);
-          sendResponse({ ok: true });
+          const ack = await startReading(message.segments, message.voiceId, message.model, message.speed);
+          sendResponse(ack);
         } catch {
           sendResponse({ ok: false, error: messageForKind('unknown') });
         }

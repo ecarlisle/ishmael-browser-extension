@@ -48,9 +48,9 @@ analytics, no hosted backend, no voice cloning, no cloud history.
 
 - Node.js 20.19+ (or 22.12+)
 - pnpm (the repository's `devEngines` pins pnpm `^11.4.0`)
-- Chrome (recent stable; uses `offscreen`, `storage.session`, and
-  `chrome.storage.local.setAccessLevel`, which need Chrome 102–116+ depending
-  on the feature)
+- Chrome 116+ (recent stable; uses `chrome.runtime.getContexts()` (116+),
+  the `offscreen` API (109+), `storage.session`, and
+  `chrome.storage.local.setAccessLevel` (102+))
 
 ## Install dependencies
 
@@ -134,41 +134,67 @@ selection, transport controls, segment status) → status line → collapsible
 are already saved, and open automatically when either is missing. Click
 **Voice settings** to expand and edit them at any time.
 
-## Troubleshooting: "Background audio did not start"
+## Troubleshooting: "Background audio did not become ready"
 
-**Root cause.** Creating the offscreen audio document resolves as soon as the
-page exists — before its script has finished loading and registered its
-message listener. Messages sent in that window fail with "Receiving end does
-not exist." This is most visible right after reloading the extension (or on a
-cold start), because the offscreen document is recreated from scratch each
-time. The failure happens **before any Fish Audio request is made**: the
-narration session itself never reached the audio controller.
+**Root cause (resolved).** Offscreen documents support only the
+`chrome.runtime` extension API — other `chrome.*` namespaces, including
+`chrome.storage`, are not available there. The controller previously executed
+`chrome.storage.local` at module startup; that threw as soon as `offscreen.js`
+loaded, so the runtime message listener was never registered and the
+controller could never answer `PING`. The service worker's handshake then
+correctly reported "Background audio did not become ready." The failure
+happened **before any Fish Audio request**: the narration session never
+reached the audio controller.
 
-**Fix (already implemented).** The service worker now runs a readiness
-handshake before starting narration:
+(The earlier theory that `chrome.offscreen.createDocument()` resolves before
+the page finishes loading was wrong: Chrome's documentation says it resolves
+after the document completes its initial page load.)
 
-1. It polls the offscreen document with `PING` until it answers `PONG`
-   (bounded, roughly two seconds), tolerating "no receiving end" responses
-   while the document warms up.
-2. Only then does it send `START_READING`, and it requires a validated
-   acknowledgement before reporting success.
+**Fix (already implemented).**
+
+1. The offscreen controller no longer touches `chrome.storage` (or any
+   extension API other than `chrome.runtime`). The Fish Audio API key is
+   delivered over runtime messaging as the **unicast response** to a
+   `GET_API_KEY` request the controller sends to the service worker — runtime
+   message responses reach only the requesting context, so the key never
+   travels in a broadcast payload and never reaches content scripts. The key
+   is held only in the controller's memory for the session, never stored,
+   logged, or included in errors.
+2. The service worker follows Chrome's documented offscreen lifecycle
+   pattern: it checks for an existing document with
+   `chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'],
+   documentUrls: [offscreenUrl] })` (Chrome 116+; `offscreen.hasDocument()`
+   is Chrome 150+) and guards concurrent creation with a module-level
+   promise.
+3. A readiness handshake remains as a verification step: the service worker
+   polls `PING` until the controller answers a validated `PONG` (bounded,
+   roughly two seconds), then sends `START_READING` and requires a validated
+   acknowledgement. Startup failures are logged with a safe technical tag
+   (`create-failed`, `no-context`, `no-receiver`, `malformed-pong`,
+   `not-ready`, `start-not-acknowledged`, `controller-rejected`) — never
+   message contents, the API key, or narrated text.
 
 The popup shows a distinct, actionable message for each failure stage:
 
-- *"Background audio did not become ready…"* — the document never answered
-  `PING` within the budget.
-- *"Background audio did not start…"* — the document was ready but never
+- *"Background audio did not become ready…"* — the controller never answered
+  `PING` within the budget (its startup code may have thrown).
+- *"Background audio did not start…"* — the controller was ready but never
   acknowledged (or rejected) `START_READING`.
+- *"Could not create the background audio page…"* — `createDocument()`
+  failed.
+- *"The background audio page could not be found…"* — the offscreen context
+  disappeared after creation.
 - Controller rejections (for example "No API key saved.") are passed through
   unchanged.
 
 **If you still see an error, in this order:**
 
 1. `brave://extensions` or `chrome://extensions` → find Ishmael → **Inspect
-   views** → **service worker** → open the console and look for "Receiving end
-does not exist" or other errors.
-2. **Inspect views** → the offscreen document (`offscreen.html`) → open its
-   console and confirm `offscreen.js` loaded without exceptions.
+   views** → the offscreen document (`offscreen.html`) → open its console and
+   look for the startup exception (historically
+   `TypeError: Cannot read properties of undefined (reading 'local')`).
+2. **Inspect views** → **service worker** → open the console and look for the
+   `[ishmael] offscreen startup failed` diagnostic and its `problem` tag.
 3. Confirm `dist/offscreen.html` and `dist/offscreen.js` both exist after
    `pnpm build`.
 4. Reload the extension and retry. If it still fails, the console output from
@@ -183,7 +209,11 @@ does not exist" or other errors.
 4. Paste it into the popup's **Fish Audio API key** field and click **Save key**.
 
 The key is stored in `chrome.storage.local` in your Chrome profile. It is sent
-only to Fish Audio's API as a `Bearer` token.
+only to Fish Audio's API as a `Bearer` token. Internally it travels from the
+service worker to the offscreen controller as the unicast response to a
+`GET_API_KEY` runtime message — it never appears in broadcast messages,
+playback status, session history, or logs, and it is never sent to content
+scripts.
 
 ## Obtain and enter a Fish voice/reference ID
 
@@ -249,8 +279,9 @@ settings handling. Extension runtime behavior is best verified manually:
     shortcut if a browser conflicts at `chrome://extensions/shortcuts` or
     `brave://extensions/shortcuts`.
 14. Reload the extension (or restart the browser) and immediately press
-    **Alt+Shift+R**: the startup handshake should wait out the offscreen warm-up
-    and start narration instead of failing with "Receiving end does not exist."
+    **Alt+Shift+R**: narration should start normally; the handshake verifies
+    the controller initialized, and the offscreen document's console should
+    show no startup exception.
 15. With the popup closed, make a shortcut fail (for example remove the API
     key first): reopen the popup and confirm it explains the failure instead
     of silently showing no session.
@@ -262,7 +293,10 @@ settings handling. Extension runtime behavior is best verified manually:
 - The API key is stored in the browser's local extension storage. That is
   convenient but **not equivalent to a secure backend**: anyone with access to
   your Chrome profile could read it. Avoid narrating sensitive pages with a
-  third-party service.
+  third-party service. Within the extension the key travels only through
+  extension-internal runtime messaging (a unicast response to the offscreen
+  controller's `GET_API_KEY` request), is never written to playback status or
+  session history, is never logged, and is never sent to content scripts.
 - Ishmael keeps no narration history. Audio caching is temporary and in-memory
   (a small window around the current segment) and is released when narration
   stops.
@@ -297,9 +331,9 @@ service worker (src/background)
   ▼
 content script (src/content)          offscreen document (src/offscreen)
   extracts page/selection segments      owns Fish Audio requests, the narration
-  with Readability on a clone           queue, and the <audio> element; reads the
-  (never modifies the page)             API key from storage; keeps playing with
-                                        the popup closed
+  with Readability on a clone           queue, and the <audio> element; receives
+  (never modifies the page)             the API key over runtime messaging and
+                                        keeps playing with the popup closed
 ```
 
 Shared modules (`src/shared`) contain message types and validators, segment
@@ -313,7 +347,8 @@ messages; the content script never sees the API key.
 | --- | --- |
 | `index.html`, `src/popup/popup.ts`, `src/popup/popup.css` | Popup UI |
 | `src/popup/status-tone.ts` | Status → tone/ARIA-role mapping for popup status text |
-| `src/background/service-worker.ts`, `src/background/start-reading.ts` | MV3 service worker + offscreen readiness handshake and START_READING acknowledgement |
+| `src/background/service-worker.ts`, `src/background/start-reading.ts` | MV3 service worker + offscreen lifecycle (`runtime.getContexts`), readiness handshake, and validated START_READING acknowledgement |
+| `src/offscreen/offscreen-boundary.test.ts` | Regression test proving the offscreen entry point works without `chrome.storage` |
 | `src/background/commands.ts` | Keyboard-command → narration-source mapping |
 | `src/content/extract.ts`, `src/content/extract-core.ts` | Content script + pure extraction logic |
 | `src/offscreen/audio.ts`, `src/offscreen/audio-core.ts` | Offscreen audio controller + pure helpers (request shaping, in-flight registry, URL cache) |

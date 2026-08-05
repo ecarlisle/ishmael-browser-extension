@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIdleStatus } from '../shared/playback';
 
 const validSegment = { id: 'p-1', kind: 'paragraph', text: 'Hello world.' };
@@ -9,6 +9,8 @@ const SAVED_SETTINGS: Record<string, unknown> = {
   'ishmael.model': 's2.1-pro-free',
   'ishmael.speed': 1,
 };
+
+const OFFSCREEN_URL = 'chrome-extension://test/offscreen.html';
 
 const pong = { type: 'PONG', status: createIdleStatus() } as const;
 
@@ -22,11 +24,16 @@ function defaultSendMessage(message: unknown): Promise<unknown> {
   return Promise.resolve(undefined);
 }
 
+type RuntimeListener = (message: unknown, sender: unknown, sendResponse: (response: unknown) => void) => boolean;
+
 type ChromeStub = {
   runtime: {
-    onMessage: { addListener: (listener: unknown) => void };
+    onMessage: { addListener: (listener: RuntimeListener) => void };
     onInstalled: { addListener: (listener: unknown) => void };
     onStartup: { addListener: (listener: unknown) => void };
+    getURL: (path: string) => string;
+    getContexts: (filter: unknown) => Promise<unknown[]>;
+    ContextType: { OFFSCREEN_DOCUMENT: string };
     sendMessage: (message: unknown) => Promise<unknown>;
   };
   storage: {
@@ -47,24 +54,45 @@ type ChromeStub = {
   scripting: { executeScript: () => Promise<unknown[]> };
   commands: { onCommand: { addListener: (listener: (command: string) => void) => void } };
   offscreen: {
-    hasDocument: () => Promise<boolean>;
     createDocument: () => Promise<undefined>;
     Reason: { AUDIO_PLAYBACK: string };
   };
 };
 
-function makeChrome(options: { sendMessage?: (message: unknown) => Promise<unknown> } = {}): {
+function makeChrome(
+  options: {
+    sendMessage?: (message: unknown) => Promise<unknown>;
+    createDocument?: () => Promise<undefined>;
+  } = {},
+): {
   chrome: ChromeStub;
   sessionWrites: unknown[];
   commandListeners: ((command: string) => void)[];
+  messageListeners: RuntimeListener[];
+  getContextsCalls: unknown[];
 } {
   const sessionWrites: unknown[] = [];
   const commandListeners: ((command: string) => void)[] = [];
+  const messageListeners: RuntimeListener[] = [];
+  const getContextsCalls: unknown[] = [];
+  let documentCreated = false;
   const chrome: ChromeStub = {
     runtime: {
-      onMessage: { addListener: () => undefined },
+      onMessage: {
+        addListener: (listener) => {
+          messageListeners.push(listener);
+        },
+      },
       onInstalled: { addListener: () => undefined },
       onStartup: { addListener: () => undefined },
+      getURL: (path) => `chrome-extension://test/${path}`,
+      getContexts: async (filter) => {
+        getContextsCalls.push(filter);
+        return documentCreated
+          ? [{ documentUrl: OFFSCREEN_URL, contextType: 'OFFSCREEN_DOCUMENT' }]
+          : [];
+      },
+      ContextType: { OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT' },
       sendMessage: options.sendMessage ?? defaultSendMessage,
     },
     storage: {
@@ -109,16 +137,14 @@ function makeChrome(options: { sendMessage?: (message: unknown) => Promise<unkno
       },
     },
     offscreen: {
-      async hasDocument() {
-        return false;
-      },
       async createDocument() {
-        return undefined;
+        documentCreated = true;
+        return options.createDocument ? options.createDocument() : undefined;
       },
       Reason: { AUDIO_PLAYBACK: 'AUDIO_PLAYBACK' },
     },
   };
-  return { chrome, sessionWrites, commandListeners };
+  return { chrome, sessionWrites, commandListeners, messageListeners, getContextsCalls };
 }
 
 async function importBeginReading(): Promise<
@@ -129,10 +155,9 @@ async function importBeginReading(): Promise<
   return mod.beginReading;
 }
 
-/** Flushes pending microtasks and the shortest timers used by the flow. */
-async function flush(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 10));
-}
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('beginReading startup handshake', () => {
   it('caches a loading state only after the offscreen controller acknowledges (page)', async () => {
@@ -194,8 +219,86 @@ describe('beginReading startup handshake', () => {
     const beginReading = await importBeginReading();
 
     const result = await beginReading('page');
-    expect(result).toEqual({ ok: false, error: 'Background audio did not start. Check the service worker and offscreen consoles, then reload the extension.' });
+    expect(result).toEqual({
+      ok: false,
+      error: 'Background audio did not start. Check the service worker and offscreen consoles, then reload the extension.',
+    });
     expect(sessionWrites).toHaveLength(0);
+  });
+
+  it('reports a distinct error and logs a safe diagnostic when the offscreen document cannot be created', async () => {
+    const { chrome, sessionWrites } = makeChrome({
+      createDocument: async () => {
+        throw new Error('create failed');
+      },
+    });
+    vi.stubGlobal('chrome', chrome);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const beginReading = await importBeginReading();
+
+    const result = await beginReading('page');
+    expect(result).toEqual({
+      ok: false,
+      error: 'Could not create the background audio page. Check the service worker console, then reload the extension.',
+    });
+    expect(sessionWrites).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith('[ishmael] offscreen startup failed', { problem: 'create-failed' });
+  });
+
+  it('checks for an existing offscreen document via runtime.getContexts with the offscreen URL', async () => {
+    const { chrome, getContextsCalls } = makeChrome();
+    vi.stubGlobal('chrome', chrome);
+    const beginReading = await importBeginReading();
+
+    await beginReading('page');
+    expect(getContextsCalls.length).toBeGreaterThan(0);
+    expect(getContextsCalls[0]).toEqual({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: ['chrome-extension://test/offscreen.html'],
+    });
+  });
+});
+
+describe('GET_API_KEY contract', () => {
+  it('answers GET_API_KEY with the stored key as a unicast response', async () => {
+    const { chrome, messageListeners } = makeChrome();
+    vi.stubGlobal('chrome', chrome);
+    await importBeginReading();
+
+    const listener = messageListeners[0];
+    expect(listener).toBeDefined();
+    let response: unknown;
+    listener?.({ target: 'service-worker', type: 'GET_API_KEY' }, {}, (value) => {
+      response = value;
+    });
+    await vi.waitFor(() => expect(response).toEqual({ ok: true, apiKey: 'test-key' }));
+  });
+
+  it('answers GET_API_KEY with a missing-key error when no key is saved', async () => {
+    const { chrome, messageListeners } = makeChrome();
+    vi.stubGlobal('chrome', chrome);
+    const originalGet = chrome.storage.local.get;
+    chrome.storage.local.get = async () => ({ 'ishmael.voiceId': 'voice-ref' });
+    await importBeginReading();
+
+    const listener = messageListeners[0];
+    let response: unknown;
+    listener?.({ target: 'service-worker', type: 'GET_API_KEY' }, {}, (value) => {
+      response = value;
+    });
+    await vi.waitFor(() => expect(response).toEqual({ ok: false, error: 'No Fish Audio API key saved. Add one in the voice settings.' }));
+    chrome.storage.local.get = originalGet;
+  });
+
+  it('never stores the API key in playback status or any session data', async () => {
+    const { chrome, sessionWrites } = makeChrome();
+    vi.stubGlobal('chrome', chrome);
+    const beginReading = await importBeginReading();
+
+    const result = await beginReading('page');
+    expect(result).toEqual({ ok: true });
+    const serialized = JSON.stringify(sessionWrites);
+    expect(serialized).not.toContain('test-key');
   });
 });
 
@@ -230,7 +333,7 @@ describe('keyboard shortcuts', () => {
     await importBeginReading();
 
     commandListeners[0]?.('toggle-feature');
-    await flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(sessionWrites).toHaveLength(0);
   });
 

@@ -4,6 +4,7 @@ import {
   OFFSCREEN_NOT_READY_MESSAGE,
   START_READING_FAILED_MESSAGE,
   READY_MAX_ATTEMPTS,
+  type SendOutcome,
   type StartReadingResult,
 } from './start-reading';
 import { createIdleStatus } from '../shared/playback';
@@ -20,12 +21,13 @@ const startMessage: Extract<ExtensionMessage, { type: 'START_READING' }> = {
 
 const noDelay = async (): Promise<void> => undefined;
 
-const pong = { type: 'PONG', status: createIdleStatus() } as const;
-const accepted = { ok: true } as const;
+const pong: SendOutcome = { ok: true, value: { type: 'PONG', status: createIdleStatus() } };
+const accepted: SendOutcome = { ok: true, value: { ok: true } };
+const noReceiver: SendOutcome = { ok: false, problem: 'no-receiver' };
 
 /** Records which message types were sent while delegating to `handler`. */
-function makeSend(handler: (message: ExtensionMessage) => unknown | Promise<unknown>): {
-  send: (message: ExtensionMessage) => Promise<unknown>;
+function makeSend(handler: (message: ExtensionMessage) => SendOutcome | Promise<SendOutcome>): {
+  send: (message: ExtensionMessage) => Promise<SendOutcome>;
   sentPings: () => number;
   sentStartReading: () => number;
 } {
@@ -43,7 +45,7 @@ function makeSend(handler: (message: ExtensionMessage) => unknown | Promise<unkn
 }
 
 describe('startOffscreenSession readiness handshake', () => {
-  it('succeeds when an existing offscreen document is already ready and acknowledges', async () => {
+  it('succeeds when an existing offscreen controller is already ready and acknowledges', async () => {
     const { send, sentPings, sentStartReading } = makeSend((message) =>
       message.type === 'PING' ? pong : accepted,
     );
@@ -53,14 +55,14 @@ describe('startOffscreenSession readiness handshake', () => {
     expect(sentStartReading()).toBe(1);
   });
 
-  it('succeeds when a newly created document becomes ready after a short delay', async () => {
+  it('succeeds when the controller becomes ready after a short startup delay', async () => {
     let pings = 0;
     const { send } = makeSend((message) => {
       if (message.type === 'PING') {
         pings += 1;
-        // First two polls hit the race where createDocument resolved before
-        // the controller registered its listener.
-        return pings <= 2 ? undefined : pong;
+        // The first two polls arrive while the controller is still warming
+        // up; it answers from the third poll on.
+        return pings <= 2 ? noReceiver : pong;
       }
       return accepted;
     });
@@ -69,21 +71,37 @@ describe('startOffscreenSession readiness handshake', () => {
     expect(pings).toBe(3);
   });
 
-  it('returns a specific error when the document never becomes ready, without sending START_READING', async () => {
-    const { send, sentPings, sentStartReading } = makeSend(() => undefined);
+  it('reports a no-receiver problem when the controller never becomes ready, without sending START_READING', async () => {
+    const { send, sentPings, sentStartReading } = makeSend(() => noReceiver);
     const result = await startOffscreenSession(startMessage, send, noDelay);
-    expect(result).toEqual({ ok: false, error: OFFSCREEN_NOT_READY_MESSAGE });
+    expect(result).toEqual({
+      ok: false,
+      error: OFFSCREEN_NOT_READY_MESSAGE,
+      problem: 'no-receiver',
+    });
     expect(sentPings()).toBe(READY_MAX_ATTEMPTS);
     expect(sentStartReading()).toBe(0);
   });
 
-  it('treats a missing receiver (delivery rejection) as not ready', async () => {
-    const { send, sentStartReading } = makeSend(() => {
-      throw new Error('Receiving end does not exist.');
-    });
+  it('reports a malformed-pong problem when the controller responds with an invalid payload', async () => {
+    const { send, sentStartReading } = makeSend((message) =>
+      message.type === 'PING' ? { ok: true, value: 'not-a-pong' } : accepted,
+    );
     const result = await startOffscreenSession(startMessage, send, noDelay);
-    expect(result).toEqual({ ok: false, error: OFFSCREEN_NOT_READY_MESSAGE });
+    expect(result).toEqual({
+      ok: false,
+      error: OFFSCREEN_NOT_READY_MESSAGE,
+      problem: 'malformed-pong',
+    });
     expect(sentStartReading()).toBe(0);
+  });
+
+  it('treats an undefined response (listener present but silent) as no receiver', async () => {
+    const { send } = makeSend((message) =>
+      message.type === 'PING' ? { ok: true, value: undefined } : accepted,
+    );
+    const result = await startOffscreenSession(startMessage, send, noDelay);
+    expect(result).toMatchObject({ ok: false, problem: 'no-receiver' });
   });
 
   it('succeeds on a valid START_READING acknowledgement after the controller is ready', async () => {
@@ -93,9 +111,15 @@ describe('startOffscreenSession readiness handshake', () => {
   });
 
   it('rejects a malformed acknowledgement instead of treating it as success', async () => {
-    const { send } = makeSend((message) => (message.type === 'PING' ? pong : { ok: 'yes' }));
+    const { send } = makeSend((message) =>
+      message.type === 'PING' ? pong : { ok: true, value: { ok: 'yes' } },
+    );
     const result = await startOffscreenSession(startMessage, send, noDelay);
-    expect(result).toEqual({ ok: false, error: START_READING_FAILED_MESSAGE });
+    expect(result).toEqual({
+      ok: false,
+      error: START_READING_FAILED_MESSAGE,
+      problem: 'start-not-acknowledged',
+    });
   });
 
   it('returns the controller error without retrying a rejected session', async () => {
@@ -103,29 +127,41 @@ describe('startOffscreenSession readiness handshake', () => {
     const { send } = makeSend((message) => {
       if (message.type === 'PING') return pong;
       calls += 1;
-      return { ok: false, error: 'No API key saved.' };
+      return { ok: true, value: { ok: false, error: 'No API key saved.' } };
     });
     const result = await startOffscreenSession(startMessage, send, noDelay);
-    expect(result).toEqual({ ok: false, error: 'No API key saved.' });
+    expect(result).toEqual({
+      ok: false,
+      error: 'No API key saved.',
+      problem: 'controller-rejected',
+    });
     expect(calls).toBe(1);
   });
 
-  it('returns a distinct error when ready but START_READING is never acknowledged (bounded retries)', async () => {
+  it('reports start-not-acknowledged when ready but START_READING is never acknowledged (bounded retries)', async () => {
     let calls = 0;
     const { send } = makeSend((message) => {
       if (message.type === 'PING') return pong;
       calls += 1;
-      return undefined;
+      return noReceiver;
     });
     const result = await startOffscreenSession(startMessage, send, noDelay);
-    expect(result).toEqual({ ok: false, error: START_READING_FAILED_MESSAGE });
+    expect(result).toEqual({
+      ok: false,
+      error: START_READING_FAILED_MESSAGE,
+      problem: 'start-not-acknowledged',
+    });
     expect(calls).toBe(2);
   });
 
   it('never reports success for a non-ok result (no false loading state)', async () => {
-    const { send } = makeSend((message) => (message.type === 'PING' ? pong : undefined));
+    const { send } = makeSend((message) => (message.type === 'PING' ? pong : noReceiver));
     const result = await startOffscreenSession(startMessage, send, noDelay);
-    expect(result).toEqual({ ok: false, error: START_READING_FAILED_MESSAGE });
+    expect(result).toEqual({
+      ok: false,
+      error: START_READING_FAILED_MESSAGE,
+      problem: 'start-not-acknowledged',
+    });
   });
 
   it('retries START_READING once after a transient delivery failure once ready', async () => {
@@ -133,7 +169,7 @@ describe('startOffscreenSession readiness handshake', () => {
     const { send } = makeSend((message) => {
       if (message.type === 'PING') return pong;
       calls += 1;
-      if (calls === 1) throw new Error('Receiving end does not exist.');
+      if (calls === 1) return noReceiver;
       return accepted;
     });
     const result = await startOffscreenSession(startMessage, send, noDelay);

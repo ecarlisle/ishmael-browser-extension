@@ -26,6 +26,10 @@ export type ExtensionMessage =
   | { target: 'service-worker'; type: 'STOP' }
   // Offscreen → service worker (and popup, for live UI updates)
   | { target: 'service-worker'; type: 'PLAYBACK_STATE'; status: PlaybackStatus }
+  // Offscreen → service worker. The Fish Audio API key is delivered only as
+  // the unicast response to this request — never inside a broadcast payload —
+  // so content scripts (which receive every runtime message) never see it.
+  | { target: 'service-worker'; type: 'GET_API_KEY' }
   // Service worker → offscreen
   | {
       target: 'offscreen';
@@ -54,6 +58,7 @@ const SERVICE_WORKER_SIMPLE_TYPES: readonly string[] = [
   'PREVIOUS',
   'NEXT',
   'STOP',
+  'GET_API_KEY',
 ];
 
 const OFFSCREEN_SIMPLE_TYPES: readonly string[] = ['PLAY_PAUSE', 'PREVIOUS', 'NEXT', 'STOP', 'PING'];
@@ -131,5 +136,19 @@ export type StartReadingAck = { ok: true } | { ok: false; error: string };
 export function isStartReadingAck(value: unknown): value is StartReadingAck {
   if (!isRecord(value)) return false;
   if (value.ok === true) return true;
+  return value.ok === false && typeof value.error === 'string' && value.error.length > 0;
+}
+
+/**
+ * Service worker's response to a GET_API_KEY request. The key is delivered
+ * only to the requesting offscreen document (runtime-message responses are
+ * unicast to the sender), is never stored in playback status or session
+ * history, and is never included in error messages.
+ */
+export type ApiKeyResponse = { ok: true; apiKey: string } | { ok: false; error: string };
+
+export function isApiKeyResponse(value: unknown): value is ApiKeyResponse {
+  if (!isRecord(value)) return false;
+  if (value.ok === true) return typeof value.apiKey === 'string' && value.apiKey.length > 0;
   return value.ok === false && typeof value.error === 'string' && value.error.length > 0;
 }
