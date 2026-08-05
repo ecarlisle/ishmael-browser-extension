@@ -1,0 +1,34 @@
+{
+  "name": "reader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Extract the meaningful content of the current page and read it aloud using Fish Audio text-to-speech.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "node scripts/build.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.2.5",
+    "@types/jsdom": "^28.0.3",
+    "@types/node": "^26.1.2",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.4.0",
+      "onFail": "download"
+    }
+  }
+}

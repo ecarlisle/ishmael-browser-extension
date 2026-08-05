@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reader</title>
+  </head>
+  <body>
+    <main class="popup">
+      <header class="popup__header">
+        <h1>Reader</h1>
+        <p class="popup__tagline">Listen to the current page.</p>
+      </header>
+
+      <section class="card" aria-labelledby="settings-heading">
+        <h2 id="settings-heading">Voice settings</h2>
+
+        <div class="field">
+          <label for="api-key">Fish Audio API key</label>
+          <div class="row">
+            <input
+              id="api-key"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Paste your API key"
+              aria-describedby="api-key-hint"
+            />
+            <button id="save-key" type="button">Save key</button>
+          </div>
+          <p id="api-key-hint" class="hint">
+            Stored in this browser's local extension storage. Not sent to content scripts or any server except Fish Audio.
+          </p>
+          <p id="key-state" class="key-state" role="status"></p>
+          <div id="key-actions" class="row" hidden>
+            <button id="replace-key" type="button">Replace key</button>
+            <button id="remove-key" type="button" class="danger">Remove key</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="voice-id">Voice / reference ID</label>
+          <input
+            id="voice-id"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Paste a Fish Audio voice ID"
+            aria-describedby="voice-id-hint"
+          />
+          <p id="voice-id-hint" class="hint">Find this in Fish Audio's VoiceLab after creating a voice from reference audio.</p>
+        </div>
+
+        <div class="field">
+          <label for="model">Model</label>
+          <select id="model">
+            <option value="s2.1-pro-free">s2.1-pro-free (free tier)</option>
+            <option value="s2.1-pro">s2.1-pro</option>
+            <option value="s2-pro">s2-pro</option>
+            <option value="s1">s1</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <div class="speed-label">
+            <label for="speed">Speed</label>
+            <output id="speed-value" for="speed">1.0×</output>
+          </div>
+          <input id="speed" type="range" min="0.5" max="2" step="0.1" value="1" aria-describedby="speed-hint" />
+          <p id="speed-hint" class="hint">Applies to new narration immediately.</p>
+        </div>
+
+        <button id="save-voice" type="button" class="primary">Save voice settings</button>
+      </section>
+
+      <section class="card" aria-labelledby="listen-heading">
+        <h2 id="listen-heading">Listen</h2>
+        <div class="row">
+          <button id="read-page" type="button" class="primary">Read page</button>
+          <button id="read-selection" type="button" class="primary">Read selection</button>
+        </div>
+        <div class="row transport" role="group" aria-label="Playback controls">
+          <button id="play-pause" type="button">Pause</button>
+          <button id="prev" type="button" aria-label="Previous segment">Previous</button>
+          <button id="next" type="button" aria-label="Next segment">Next</button>
+          <button id="stop" type="button">Stop</button>
+        </div>
+        <p id="segment-info" class="segment-info" aria-live="polite">No active session</p>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <footer class="popup__footer">
+        <p class="privacy-note">
+          Page text is sent to Fish Audio to generate speech. Your API key stays in this browser's local extension
+          storage; no narration history is kept and audio caching is temporary and in-memory. Avoid narrating sensitive
+          pages with a third-party service.
+        </p>
+      </footer>
+    </main>
+    <script type="module" src="/src/popup/popup.ts"></script>
+  </body>
+</html>

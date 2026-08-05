@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+
+# Build output (regenerate with `pnpm build`)
+dist/
+
+# Logs and OS noise
+*.log
+.DS_Store
