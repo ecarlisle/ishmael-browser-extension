@@ -204,12 +204,24 @@ handshake.
 
 ## Popup layout
 
-The popup is ordered: header/tagline → **Listen** card (Read page, Read
-selection, transport controls, segment status) → status line → collapsible
-**Voice settings** → privacy note. Voice settings use a native disclosure
-(`<details>/<summary>`): they start collapsed when an API key and reference ID
-are already saved, and open automatically when either is missing. Click
-**Voice settings** to expand and edit them at any time.
+The popup is one fixed-size window (340×600) with two internal views switched
+by a compact tab bar: **Listen** (Read page, Read selection, transport
+controls, segment status) and **Voice Settings** (API key, voice/reference ID,
+model, mood, speed, and save/reset controls). The popup never resizes when the
+user navigates between views.
+
+Tabs follow the ARIA tabs pattern: `role="tablist"/"tab"/"tabpanel"`, roving
+tabindex, arrow-key (plus Home/End) navigation, `aria-selected` state, and
+visible focus outlines. Each field has an explicit label; explanatory text is
+a click away in the compact **Settings help** disclosure, and the full privacy
+note lives in the **Privacy & data** footer disclosure, so the primary
+settings stay unobstructed.
+
+The popup opens on **Voice Settings** when an API key or reference ID is
+still missing (mirroring the old auto-expanded disclosure), and on **Listen**
+when everything is configured. The settings view fits its fixed area without
+scrolling; if the browser window is unusually short, the active view scrolls
+rather than clipping.
 
 ## Troubleshooting: "Background audio did not become ready"
 
