@@ -205,6 +205,105 @@ describe('hidden-subtree handling (no truncation)', () => {
   });
 });
 
+describe('inline emphasis extraction', () => {
+  it('records ranges for <strong> and <em> phrases', () => {
+    const main = documentFrom(`
+      <main>
+        <p>This result is <strong>especially important</strong> for readers.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const segments = collectSegmentsFromRoot(main, false);
+    expect(segments).toHaveLength(1);
+    const s = segments[0]!;
+    expect(s.text).toBe('This result is especially important for readers.');
+    expect(s.emphasis).toEqual([[15, 35]]);
+  });
+
+  it('only records the outermost emphasis element (no double ranges)', () => {
+    const main = documentFrom(`
+      <main>
+        <p>Outer <strong>bold with <em>nested</em> tail</strong> done.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const s = collectSegmentsFromRoot(main, false)[0]!;
+    expect(s.text).toBe('Outer bold with nested tail done.');
+    expect(s.emphasis).toEqual([[6, 27]]);
+  });
+
+  it('ignores <b> and <i> (presentational styling, not emphasis)', () => {
+    const main = documentFrom(`
+      <main>
+        <p>Plain <b>bold</b> and <i>italic</i> stay unmarked.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const s = collectSegmentsFromRoot(main, false)[0]!;
+    expect(s.text).toBe('Plain bold and italic stay unmarked.');
+    expect(s.emphasis).toBeUndefined();
+  });
+
+  it('trims whitespace that formatted <strong> markup picks up', () => {
+    const main = documentFrom(`
+      <main>
+        <p>Value <strong>\n 42 \n</strong> matters.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const s = collectSegmentsFromRoot(main, false)[0]!;
+    expect(s.text).toBe('Value 42 matters.');
+    expect(s.emphasis).toEqual([[6, 8]]);
+  });
+
+  it('maps emphasis correctly through normalization of surrounding whitespace', () => {
+    const main = documentFrom(`
+      <main>
+        <p>Start   <strong>key result</strong>   End.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const s = collectSegmentsFromRoot(main, false)[0]!;
+    expect(s.text).toBe('Start key result End.');
+    expect(s.emphasis).toEqual([[6, 16]]);
+  });
+});
+
+describe('thematic breaks (<hr>)', () => {
+  it('marks the following segment with thematicBreakBefore', () => {
+    const main = documentFrom(`
+      <main>
+        <p>Before the break.</p>
+        <hr>
+        <p>After the break.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const segments = collectSegmentsFromRoot(main, false);
+    expect(segments.map((s) => s.thematicBreakBefore ?? false)).toEqual([false, true]);
+  });
+
+  it('never produces a segment for the hr itself', () => {
+    const main = documentFrom(`
+      <main>
+        <p>Only content.</p>
+        <hr>
+      </main>
+    `).querySelector('main') as Element;
+    const segments = collectSegmentsFromRoot(main, false);
+    expect(segments.map((s) => s.kind)).toEqual(['paragraph']);
+  });
+
+  it('survives the fallback extraction path', () => {
+    const fallback = extractFromFallback(
+      documentFrom(`
+        <main>
+          <p>Part one.</p>
+          <hr>
+          <p>Part two.</p>
+        </main>
+      `),
+    );
+    expect(fallback).not.toBeNull();
+    const second = (fallback ?? []).find((s) => s.text === 'Part two.');
+    expect(second?.thematicBreakBefore).toBe(true);
+  });
+});
+
 describe('extractSelectionFromDocument', () => {
   it('returns the selected text as a single paragraph segment', () => {
     const document = documentFrom('<p>Nothing selected by default.</p>');

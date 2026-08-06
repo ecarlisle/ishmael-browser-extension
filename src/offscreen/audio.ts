@@ -9,7 +9,8 @@
 // the service worker; it never travels inside a broadcast message, is never
 // stored or logged, and never leaves this trusted extension context.
 
-import { chunkSegments, type NarrationChunk } from '../shared/chunking';
+import { chunkSegments } from '../shared/chunking';
+import { decorateChunks, type DecoratedChunk } from '../shared/decorate';
 import { isApiKeyResponse, isExtensionMessage, type StartReadingAck } from '../shared/messages';
 import {
   FishAudioError,
@@ -19,7 +20,7 @@ import {
   parseFishErrorBody,
 } from '../shared/errors';
 import type { PlaybackStatus } from '../shared/playback';
-import { clampSpeed } from '../shared/settings';
+import { clampSpeed, type Mood } from '../shared/settings';
 import type { NarrationSegment } from '../shared/segments';
 import {
   applyPlaybackRate,
@@ -41,7 +42,7 @@ let voiceId = '';
 let model = 's2.1-pro-free';
 let speed = 1;
 
-let queue: NarrationChunk[] = [];
+let queue: DecoratedChunk[] = [];
 let index = 0;
 let phase: PlaybackStatus['phase'] = 'idle';
 let errorMessage: string | undefined;
@@ -53,6 +54,9 @@ const inflight = new ChunkFetchRegistry();
 
 /** The chunk currently being fetched (-1 when none). A seek supersedes it. */
 let pendingIndex = -1;
+
+/** Cancellable holder for the inter-file semantic pause. */
+let pauseController: AbortController | undefined;
 
 /** index → object URL, bounded to a few chunks around the current one. */
 const urlCache = new ObjectUrlCache();
@@ -105,7 +109,7 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
  * user's narration speed is never sent to Fish: `prosody.speed` stays 1 and
  * playback speed is applied via `audio.playbackRate` only.
  */
-async function fetchChunk(chunk: NarrationChunk, controller: AbortController, attempt = 0): Promise<Blob> {
+async function fetchChunk(chunk: DecoratedChunk, controller: AbortController, attempt = 0): Promise<Blob> {
   try {
     const response = await fetch(TTS_ENDPOINT, {
       method: 'POST',
@@ -184,6 +188,8 @@ function finish(): void {
 function resetSession(): void {
   sessionId += 1;
   inflight.abortAll();
+  pauseController?.abort();
+  pauseController = undefined;
   shouldBePlaying = false;
   pendingIndex = -1;
   phase = 'idle';
@@ -223,7 +229,11 @@ function attachAndPlay(chunkIndex: number, url: string, playAfter = true): void 
   }
 }
 
-async function loadChunk(chunkIndex: number, playAfter = true): Promise<void> {
+function phaseIs(pending: PlaybackStatus['phase']): boolean {
+  return phase === pending;
+}
+
+async function loadChunk(chunkIndex: number, playAfter = true, opts: { skipInterChunkPause?: boolean } = {}): Promise<void> {
   const chunk = queue[chunkIndex];
   if (!chunk) {
     finish();
@@ -233,6 +243,9 @@ async function loadChunk(chunkIndex: number, playAfter = true): Promise<void> {
   pendingIndex = chunkIndex;
   const cachedUrl = urlCache.get(chunkIndex);
   if (cachedUrl) {
+    if (!(await interChunkPause(chunkIndex, mySession, opts))) return;
+    if (mySession !== sessionId || pendingIndex !== chunkIndex) return;
+    if (phaseIs('paused')) playAfter = false;
     attachAndPlay(chunkIndex, cachedUrl, playAfter);
     prefetch(chunkIndex + 1, mySession);
     return;
@@ -256,6 +269,9 @@ async function loadChunk(chunkIndex: number, playAfter = true): Promise<void> {
       // caches the URL for later.
       return;
     }
+    if (!(await interChunkPause(chunkIndex, mySession, opts))) return;
+    if (mySession !== sessionId || pendingIndex !== chunkIndex) return;
+    if (phaseIs('paused')) playAfter = false;
     const url = urlCache.getOrCreate(chunkIndex, blob);
     attachAndPlay(chunkIndex, url, playAfter);
     prefetch(chunkIndex + 1, mySession);
@@ -265,6 +281,35 @@ async function loadChunk(chunkIndex: number, playAfter = true): Promise<void> {
     const mapped = fishErrorFromUnknown(error, [apiKey]);
     if (mapped) fail(mapped.message);
   }
+}
+
+/**
+ * Holds playback for the inter-file semantic pause before `chunkIndex`'s
+ * audio starts (see `INTER_CHUNK_PAUSE_MS`). The pause is cancellable: Stop,
+ * Previous, Next, a new session, or a user seek abort it, and an aborted
+ * pause never begins audio. Returns false when superseded so the caller backs
+ * off. No pause is applied between pieces of the same long paragraph, nor
+ * where the previous chunk's own audio already ends with a synthesized tag.
+ */
+async function interChunkPause(
+  chunkIndex: number,
+  mySession: number,
+  opts: { skipInterChunkPause?: boolean },
+): Promise<boolean> {
+  if (opts.skipInterChunkPause) return true;
+  const ms = queue[chunkIndex]?.pauseBeforeMs ?? 0;
+  if (ms <= 0 || mySession !== sessionId) return true;
+  pauseController?.abort();
+  const controller = new AbortController();
+  pauseController = controller;
+  try {
+    await abortableDelay(ms, controller.signal);
+  } catch {
+    return false;
+  }
+  // Superseded while waiting (a newer command replaced the controller or the
+  // session moved on): never begin audio from a stale timer.
+  return pauseController === controller && mySession === sessionId && pendingIndex === chunkIndex;
 }
 
 async function prefetch(chunkIndex: number, mySession: number): Promise<void> {
@@ -319,6 +364,7 @@ async function startReading(
   voiceIdFromMessage: string,
   modelFromMessage: string,
   speedFromMessage: number,
+  moodFromMessage: Mood,
 ): Promise<StartReadingAck> {
   // Stop and dispose of any previous session first.
   resetSession();
@@ -333,7 +379,10 @@ async function startReading(
   model = modelFromMessage;
   speed = clampSpeed(speedFromMessage);
 
-  queue = chunkSegments(segments);
+  // Chunk the extracted segments, then decorate each chunk with the Mood cue
+  // (applied to every independently synthesized request) and structural cues
+  // derived from page semantics. Source text is never altered.
+  queue = decorateChunks(chunkSegments(segments), moodFromMessage);
   if (queue.length === 0) {
     reportStatus();
     return { ok: true };
@@ -360,8 +409,9 @@ function togglePlayPause(): void {
 
 function previous(): void {
   if (queue.length === 0) return;
+  pauseController?.abort();
   if (index > 0) {
-    void loadChunk(index - 1, phase !== 'paused');
+    void loadChunk(index - 1, phase !== 'paused', { skipInterChunkPause: true });
   } else {
     // Already at the first chunk: restart it, keeping pause state.
     audio.currentTime = 0;
@@ -374,7 +424,8 @@ function previous(): void {
 
 function next(): void {
   if (queue.length === 0 || index >= queue.length - 1) return;
-  void loadChunk(index + 1, phase !== 'paused');
+  pauseController?.abort();
+  void loadChunk(index + 1, phase !== 'paused', { skipInterChunkPause: true });
 }
 
 function stop(): void {
@@ -411,7 +462,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
       // Exactly one response is sent.
       void (async () => {
         try {
-          const ack = await startReading(message.segments, message.voiceId, message.model, message.speed);
+          const ack = await startReading(message.segments, message.voiceId, message.model, message.speed, message.mood);
           sendResponse(ack);
         } catch {
           sendResponse({ ok: false, error: messageForKind('unknown') });

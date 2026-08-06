@@ -12,11 +12,39 @@ export const MIN_SPEED = 0.5;
 export const MAX_SPEED = 2;
 export const DEFAULT_SPEED = 1;
 
+/**
+ * Optional emotional delivery applied to the entire reading. `none` (the
+ * default) preserves the page's natural tone; every other value maps to a
+ * square-bracket Fish Audio cue such as `[calm]` or `[happy]`.
+ */
+export const MOODS = [
+  'none',
+  'calm',
+  'happy',
+  'sad',
+  'excited',
+  'confident',
+  'curious',
+  'empathetic',
+  'relaxed',
+  'hopeful',
+  'nostalgic',
+  'serious',
+  'nervous',
+  'worried',
+  'angry',
+  'sarcastic',
+] as const;
+export type Mood = (typeof MOODS)[number];
+
+export const DEFAULT_MOOD: Mood = 'none';
+
 export type Settings = {
   apiKey: string;
   voiceId: string;
   model: Model;
   speed: number;
+  mood: Mood;
 };
 
 /** Shape safe to return to the popup: the API key itself is never included. */
@@ -25,6 +53,7 @@ export type RedactedSettings = {
   voiceId: string;
   model: Model;
   speed: number;
+  mood: Mood;
 };
 
 export function clampSpeed(value: number): number {
@@ -38,7 +67,8 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Validates and normalizes settings read from storage. Unknown fields are
- * dropped, invalid values fall back to defaults. Never throws.
+ * dropped, invalid values fall back to defaults. Never throws. Missing or
+ * invalid mood values sanitize to `none`.
  */
 export function sanitizeSettings(raw: unknown): Settings {
   const record = isRecord(raw) ? raw : {};
@@ -47,7 +77,8 @@ export function sanitizeSettings(raw: unknown): Settings {
   const model: Model = MODELS.includes(record.model as Model) ? (record.model as Model) : DEFAULT_MODEL;
   const speed =
     typeof record.speed === 'number' && Number.isFinite(record.speed) ? clampSpeed(record.speed) : DEFAULT_SPEED;
-  return { apiKey, voiceId, model, speed };
+  const mood: Mood = MOODS.includes(record.mood as Mood) ? (record.mood as Mood) : DEFAULT_MOOD;
+  return { apiKey, voiceId, model, speed, mood };
 }
 
 export function isSettings(value: unknown): value is Settings {
@@ -55,6 +86,7 @@ export function isSettings(value: unknown): value is Settings {
   if (typeof value.apiKey !== 'string') return false;
   if (typeof value.voiceId !== 'string') return false;
   if (typeof value.speed !== 'number' || !Number.isFinite(value.speed)) return false;
+  if (!MOODS.includes(value.mood as Mood)) return false;
   return MODELS.includes(value.model as Model);
 }
 
@@ -64,5 +96,6 @@ export function redactSettings(settings: Settings): RedactedSettings {
     voiceId: settings.voiceId,
     model: settings.model,
     speed: settings.speed,
+    mood: settings.mood,
   };
 }

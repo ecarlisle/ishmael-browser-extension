@@ -4,7 +4,7 @@ import { clampSpeed, isSettings, redactSettings, sanitizeSettings } from './sett
 describe('sanitizeSettings', () => {
   it('applies defaults for empty/unknown input', () => {
     const settings = sanitizeSettings(null);
-    expect(settings).toEqual({ apiKey: '', voiceId: '', model: 's2.1-pro-free', speed: 1 });
+    expect(settings).toEqual({ apiKey: '', voiceId: '', model: 's2.1-pro-free', speed: 1, mood: 'none' });
   });
 
   it('trims apiKey and voiceId', () => {
@@ -37,8 +37,8 @@ describe('clampSpeed', () => {
 
 describe('redactSettings', () => {
   it('never includes the apiKey value in the redacted shape', () => {
-    const redacted = redactSettings({ apiKey: 'super-secret', voiceId: 'v', model: 's2.1-pro-free', speed: 1 });
-    expect(redacted).toEqual({ hasApiKey: true, voiceId: 'v', model: 's2.1-pro-free', speed: 1 });
+    const redacted = redactSettings({ apiKey: 'super-secret', voiceId: 'v', model: 's2.1-pro-free', speed: 1, mood: 'none' });
+    expect(redacted).toEqual({ hasApiKey: true, voiceId: 'v', model: 's2.1-pro-free', speed: 1, mood: 'none' });
     expect('apiKey' in redacted).toBe(false);
     expect(JSON.stringify(redacted)).not.toContain('super-secret');
   });
@@ -50,11 +50,40 @@ describe('redactSettings', () => {
 
 describe('isSettings', () => {
   it('accepts valid settings and rejects malformed shapes', () => {
-    const valid = { apiKey: 'k', voiceId: 'v', model: 's1', speed: 1.2 };
+    const valid = { apiKey: 'k', voiceId: 'v', model: 's1', speed: 1.2, mood: 'calm' };
     expect(isSettings(valid)).toBe(true);
     expect(isSettings({ ...valid, model: 'nope' })).toBe(false);
     expect(isSettings({ ...valid, speed: NaN })).toBe(false);
     expect(isSettings({ ...valid, apiKey: 42 })).toBe(false);
+    expect(isSettings({ ...valid, mood: 'euphoric' })).toBe(false);
     expect(isSettings(null)).toBe(false);
   });
 });
+
+describe('Mood settings', () => {
+  it('defaults the mood to none for new and unknown settings', () => {
+    expect(sanitizeSettings({}).mood).toBe('none');
+    expect(sanitizeSettings({ mood: undefined }).mood).toBe('none');
+    expect(sanitizeSettings(null).mood).toBe('none');
+  });
+
+  it('accepts every curated mood value', () => {
+    const moods = ['calm', 'happy', 'sad', 'excited', 'confident', 'curious', 'empathetic', 'relaxed', 'hopeful', 'nostalgic', 'serious', 'nervous', 'worried', 'angry', 'sarcastic'] as const;
+    for (const mood of moods) {
+      expect(sanitizeSettings({ mood }).mood).toBe(mood);
+    }
+  });
+
+  it('sanitizes invalid stored mood values to none', () => {
+    expect(sanitizeSettings({ mood: 'euphoric' }).mood).toBe('none');
+    expect(sanitizeSettings({ mood: 42 }).mood).toBe('none');
+    expect(sanitizeSettings({ mood: 'NONE' }).mood).toBe('none');
+  });
+
+  it('keeps mood in the redacted shape and never in the API-key field', () => {
+    const redacted = redactSettings({ apiKey: 'k', voiceId: 'v', model: 's2.1-pro-free', speed: 1, mood: 'calm' });
+    expect(redacted.mood).toBe('calm');
+    expect('apiKey' in redacted).toBe(false);
+  });
+});
+

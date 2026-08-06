@@ -8,10 +8,19 @@
 //   3. Segments longer than the maximum are split at sentence boundaries.
 //   4. Short adjacent segments of the same kind are combined up to the
 //      maximum, aiming for paragraph-sized chunks.
+//
+// Chunks carry per-segment *parts*: the normalized source text, inline
+// emphasis ranges, and the semantic boundary before each part (`none` for a
+// continuation of the same long paragraph, `break` between different
+// segments, `long-break` when a thematic break such as `<hr>` separated
+// them). Boundary metadata survives merging and splitting so the decoration
+// layer (decorate.ts) can render Fish cues without ever altering the source
+// text or its order.
+//
 // No LLM is involved anywhere in this process.
 
 import { normalizeWhitespace } from './normalize';
-import { dedupeSegments, isHeadingKind, type NarrationSegment, type SegmentKind } from './segments';
+import { dedupeSegments, isHeadingKind, type EmphasisRange, type NarrationSegment, type SegmentKind } from './segments';
 
 export const MAX_CHUNK_CHARS = 1200;
 /** Largest buffer allowed to absorb more short segments. */
@@ -19,10 +28,28 @@ const MERGE_BUFFER_LIMIT = 500;
 /** Largest single segment that may be merged into an existing buffer. */
 const MERGE_SEGMENT_LIMIT = 500;
 
+/** Pause between two parts: none (same long paragraph), break, or long-break. */
+export type BoundaryKind = 'none' | 'break' | 'long-break';
+
+export type ChunkPart = {
+  segmentId: string;
+  kind: SegmentKind;
+  text: string;
+  /** Emphasis ranges into this part's text (already offset-adjusted). */
+  emphasis: readonly EmphasisRange[];
+  /**
+   * Semantic boundary between this part and the preceding part — either the
+   * previous part in the same chunk or the previous chunk's last part.
+   */
+  boundaryBefore: BoundaryKind;
+};
+
 export type NarrationChunk = {
   id: string;
+  /** All parts' source text joined with single spaces (no cues). */
   text: string;
   kind: SegmentKind;
+  parts: readonly ChunkPart[];
 };
 
 // ---------------------------------------------------------------------------
@@ -73,51 +100,101 @@ function fallbackSplitSentences(text: string): string[] {
 // Long-text splitting
 // ---------------------------------------------------------------------------
 
+export type TextPiece = { text: string; start: number };
+
 /**
  * Splits text into pieces of at most `maxChars`, preferring sentence
  * boundaries. A single sentence longer than `maxChars` is hard-split at word
  * boundaries as a last resort. Never drops text.
+ *
+ * Each piece reports its `start` offset within the original text so callers
+ * can map per-character metadata (such as emphasis ranges) into the pieces.
+ * Pieces are contiguous: piece[i].text occupies
+ * `text.slice(piece[i].start, piece[i + 1]?.start)`.
  */
-export function splitLongText(text: string, maxChars: number = MAX_CHUNK_CHARS): string[] {
-  const pieces: string[] = [];
-  let buffer = '';
+export function splitLongTextPieces(text: string, maxChars: number = MAX_CHUNK_CHARS): TextPiece[] {
+  const pieces: TextPiece[] = [];
 
-  const flush = () => {
-    if (buffer) {
-      pieces.push(buffer);
-      buffer = '';
+  const pushWords = (sentence: string, sentenceStart: number): void => {
+    // A single sentence longer than maxChars: hard-split at word boundaries.
+    const words = sentence.split(/\s+/);
+    let buffer: string[] = [];
+    let bufferStart = sentenceStart;
+    let chars = 0;
+    let cursor = sentenceStart;
+    for (const word of words) {
+      if (buffer.length > 0 && chars + 1 + word.length > maxChars) {
+        pieces.push({ text: buffer.join(' '), start: bufferStart });
+        buffer = [];
+        chars = 0;
+        bufferStart = cursor;
+      }
+      buffer.push(word);
+      chars += (buffer.length > 1 ? 1 : 0) + word.length;
+      cursor += word.length + 1;
     }
+    if (buffer.length > 0) pieces.push({ text: buffer.join(' '), start: bufferStart });
   };
 
-  for (const sentence of splitSentences(text)) {
+  const sentences = splitSentences(text);
+  let offset = 0;
+  let buffer: string[] = [];
+  let bufferStart = 0;
+  let bufferChars = 0;
+
+  const flush = (): void => {
+    if (buffer.length === 0) return;
+    pieces.push({ text: buffer.join(' '), start: bufferStart });
+    buffer = [];
+    bufferChars = 0;
+  };
+
+  for (const sentence of sentences) {
     if (sentence.length > maxChars) {
       flush();
-      pieces.push(...hardSplitWords(sentence, maxChars));
+      pushWords(sentence, offset);
+      offset += sentence.length + 1;
       continue;
     }
-    if (buffer && buffer.length + 1 + sentence.length > maxChars) {
+    if (buffer.length > 0 && bufferChars + 1 + sentence.length > maxChars) {
       flush();
     }
-    buffer = buffer ? `${buffer} ${sentence}` : sentence;
+    if (buffer.length === 0) bufferStart = offset;
+    buffer.push(sentence);
+    bufferChars += (buffer.length > 1 ? 1 : 0) + sentence.length;
+    offset += sentence.length + 1;
   }
   flush();
   return pieces;
 }
 
-function hardSplitWords(text: string, maxChars: number): string[] {
-  const words = text.split(/\s+/);
-  const pieces: string[] = [];
-  let buffer = '';
-  for (const word of words) {
-    if (buffer && buffer.length + 1 + word.length > maxChars) {
-      pieces.push(buffer);
-      buffer = word;
-    } else {
-      buffer = buffer ? `${buffer} ${word}` : word;
+/**
+ * Splits text into pieces of at most `maxChars`, preferring sentence
+ * boundaries. Equivalent to `splitLongTextPieces` with the offsets dropped.
+ */
+export function splitLongText(text: string, maxChars: number = MAX_CHUNK_CHARS): string[] {
+  return splitLongTextPieces(text, maxChars).map((piece) => piece.text);
+}
+
+/**
+ * Keeps only the emphasis ranges that start inside `[start, end)` and re-bases
+ * them into the piece's own coordinates. A range straddling a piece boundary
+ * stays with the piece where it begins (the cue sits before the phrase, and
+ * real emphasis phrases do not cross sentence boundaries).
+ */
+function emphasisForPiece(
+  emphasis: readonly EmphasisRange[] | undefined,
+  start: number,
+  end: number,
+): EmphasisRange[] {
+  if (!emphasis) return [];
+  const out: EmphasisRange[] = [];
+  for (const [rangeStart, rangeEnd] of emphasis) {
+    if (rangeStart >= start && rangeStart < end) {
+      out.push([rangeStart - start, Math.min(rangeEnd, end) - start]);
     }
   }
-  if (buffer) pieces.push(buffer);
-  return pieces;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,40 +202,71 @@ function hardSplitWords(text: string, maxChars: number): string[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Converts extracted segments into narration chunks in reading order.
+ * Converts extracted segments into narration chunks in reading order. Each
+ * chunk's parts retain their per-segment source text, emphasis ranges, and
+ * semantic boundary metadata (see ChunkPart), which the decoration layer uses
+ * to insert Fish cues. Deduplication happens here, on normalized source text,
+ * before any cue is applied.
  */
 export function chunkSegments(segments: readonly NarrationSegment[]): NarrationChunk[] {
   const normalized = dedupeSegments(segments);
   const chunks: NarrationChunk[] = [];
+  let emittedAny = false;
 
-  const pushChunk = (text: string, kind: SegmentKind) => {
-    const cleaned = normalizeWhitespace(text);
-    if (!cleaned) return;
-    chunks.push({ id: `chunk-${chunks.length + 1}`, text: cleaned, kind });
+  const pushChunk = (parts: readonly ChunkPart[]): void => {
+    const kind = parts[0]?.kind ?? 'paragraph';
+    const text = normalizeWhitespace(parts.map((part) => part.text).join(' '));
+    if (!text) return;
+    chunks.push({ id: `chunk-${chunks.length + 1}`, text, kind, parts: [...parts] });
   };
 
-  const canMerge = (a: NarrationSegment, b: NarrationSegment): boolean =>
+  const canMerge = (a: ChunkPart, b: NarrationSegment): boolean =>
     !isHeadingKind(a.kind) && a.kind === b.kind;
 
-  let buffer: NarrationSegment[] = [];
-  const flush = () => {
+  let buffer: ChunkPart[] = [];
+  const flush = (): void => {
     if (buffer.length === 0) return;
-    pushChunk(buffer.map((segment) => segment.text).join(' '), buffer[0]!.kind);
+    pushChunk(buffer);
     buffer = [];
   };
 
   for (const segment of normalized) {
+    const boundaryBefore: BoundaryKind = !emittedAny
+      ? 'none'
+      : segment.thematicBreakBefore === true
+        ? 'long-break'
+        : 'break';
+    emittedAny = true;
+
     if (isHeadingKind(segment.kind)) {
       // Headings are always standalone so narration pauses around them.
       flush();
-      pushChunk(segment.text, segment.kind);
+      pushChunk([
+        {
+          segmentId: segment.id,
+          kind: segment.kind,
+          text: segment.text,
+          emphasis: segment.emphasis ?? [],
+          boundaryBefore,
+        },
+      ]);
       continue;
     }
     if (segment.text.length > MAX_CHUNK_CHARS) {
-      // Unusually long segment: split at sentence boundaries.
+      // Unusually long segment: split at sentence boundaries. Each piece is
+      // its own chunk; only the first piece carries the segment's boundary
+      // (`none` for continuation pieces, so no false pause is inserted).
       flush();
-      for (const piece of splitLongText(segment.text)) {
-        pushChunk(piece, segment.kind);
+      for (const piece of splitLongTextPieces(segment.text)) {
+        pushChunk([
+          {
+            segmentId: segment.id,
+            kind: segment.kind,
+            text: piece.text,
+            emphasis: emphasisForPiece(segment.emphasis, piece.start, piece.start + piece.text.length),
+            boundaryBefore: piece.start === 0 ? boundaryBefore : 'none',
+          },
+        ]);
       }
       continue;
     }
@@ -171,11 +279,25 @@ export function chunkSegments(segments: readonly NarrationSegment[]): NarrationC
       segment.text.length <= MERGE_SEGMENT_LIMIT &&
       bufferLength + segment.text.length <= MAX_CHUNK_CHARS
     ) {
-      buffer.push(segment);
+      buffer.push({
+        segmentId: segment.id,
+        kind: segment.kind,
+        text: segment.text,
+        emphasis: segment.emphasis ?? [],
+        boundaryBefore,
+      });
       continue;
     }
     flush();
-    buffer = [segment];
+    buffer = [
+      {
+        segmentId: segment.id,
+        kind: segment.kind,
+        text: segment.text,
+        emphasis: segment.emphasis ?? [],
+        boundaryBefore,
+      },
+    ];
   }
   flush();
 

@@ -145,3 +145,73 @@ describe('chunkSegments', () => {
     expect(chunks[0]?.text).toBe('Same text.');
   });
 });
+
+describe('chunk part metadata (boundaries and emphasis)', () => {
+  it('marks the first part with no boundary and merged neighbors with a break', () => {
+    const chunks = chunkSegments([paragraph('p1', 'Short one.'), paragraph('p2', 'Short two.')]);
+    expect(chunks).toHaveLength(1);
+    const parts = chunks[0]?.parts ?? [];
+    expect(parts.map((part) => part.boundaryBefore)).toEqual(['none', 'break']);
+    expect(parts.map((part) => part.text)).toEqual(['Short one.', 'Short two.']);
+    expect(parts.map((part) => part.kind)).toEqual(['paragraph', 'paragraph']);
+  });
+
+  it('records a long-break when a thematic break separates segments', () => {
+    const chunks = chunkSegments([
+      paragraph('p1', 'Before.'),
+      { ...paragraph('p2', 'After.'), thematicBreakBefore: true },
+    ]);
+    expect(chunks[0]?.parts.map((part) => part.boundaryBefore)).toEqual(['none', 'long-break']);
+  });
+
+  it('marks continuation pieces of a split long paragraph with none', () => {
+    const text = makeText(400);
+    const chunks = chunkSegments([paragraph('p1', text)]);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0]?.parts[0]?.boundaryBefore).toBe('none');
+    for (const chunk of chunks.slice(1)) {
+      expect(chunk.parts[0]?.boundaryBefore).toBe('none');
+    }
+    expect(joinChunks(chunks)).toBe(normalizeWhitespace(text));
+  });
+
+  it('carries emphasis ranges into merged parts', () => {
+    const chunks = chunkSegments([
+      { ...paragraph('p1', 'Short one.'), emphasis: [[6, 9]] },
+      paragraph('p2', 'Short two.'),
+    ]);
+    expect(chunks[0]?.parts[0]?.emphasis).toEqual([[6, 9]]);
+    expect(chunks[0]?.parts[1]?.emphasis).toEqual([]);
+  });
+
+  it('re-bases emphasis offsets into piece-local coordinates after a split', () => {
+    const text = makeText(400);
+    const emphasisStart = text.indexOf('brown');
+    const chunks = chunkSegments([
+      { ...paragraph('p1', text), emphasis: [[emphasisStart, emphasisStart + 5]] },
+    ]);
+    expect(chunks.length).toBeGreaterThan(1);
+    const carried = chunks.filter((chunk) => chunk.parts.some((part) => part.emphasis.length > 0));
+    expect(carried).toHaveLength(1);
+    const piece = carried[0]?.parts[0];
+    expect(piece?.text).toContain('brown');
+    const [start, end] = piece?.emphasis[0] ?? [-1, -1];
+    expect(piece?.text.slice(start, end)).toBe('brown');
+  });
+
+  it('keeps a range straddling a piece boundary with the piece where it starts', () => {
+    const text = makeText(400);
+    const chunks = chunkSegments([{ ...paragraph('p1', text), emphasis: [[0, text.length]] }]);
+    expect(chunks.length).toBeGreaterThan(1);
+    const carried = chunks.filter((chunk) => chunk.parts.some((part) => part.emphasis.length > 0));
+    expect(carried).toHaveLength(1);
+    expect(carried[0]?.parts[0]?.emphasis[0]?.[0]).toBe(0);
+  });
+
+  it('drops emphasis ranges that land entirely outside a piece after normalization', () => {
+    const chunks = chunkSegments([
+      { ...paragraph('p1', '  Short.  '), emphasis: [[50, 60]] },
+    ]);
+    expect(chunks[0]?.parts[0]?.emphasis).toEqual([]);
+  });
+});

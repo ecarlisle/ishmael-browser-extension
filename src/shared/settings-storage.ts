@@ -14,7 +14,7 @@ export type SettingsStorage = {
 }
 
 const KEY_PREFIX = 'ishmael.';
-const SETTING_KEYS = ['apiKey', 'voiceId', 'model', 'speed'] as const;
+const SETTING_KEYS = ['apiKey', 'voiceId', 'model', 'speed', 'mood'] as const;
 
 export async function loadSettings(storage: SettingsStorage): Promise<Settings> {
   const raw = await storage.get(SETTING_KEYS.map((key) => `${KEY_PREFIX}${key}`));
@@ -37,6 +37,7 @@ export async function saveSettings(storage: SettingsStorage, patch: Partial<Sett
     [`${KEY_PREFIX}voiceId`]: merged.voiceId,
     [`${KEY_PREFIX}model`]: merged.model,
     [`${KEY_PREFIX}speed`]: merged.speed,
+    [`${KEY_PREFIX}mood`]: merged.mood,
   });
   return merged;
 }

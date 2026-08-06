@@ -227,6 +227,7 @@ export async function beginReading(source: 'page' | 'selection'): Promise<Simple
       voiceId: settings.voiceId,
       model: settings.model,
       speed: settings.speed,
+      mood: settings.mood,
     },
     (message) => forwardToOffscreen(message),
   );
