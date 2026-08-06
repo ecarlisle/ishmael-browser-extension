@@ -39,11 +39,30 @@ describe('isExtensionMessage', () => {
       voiceId: 'v',
       model: 's2.1-pro-free',
       speed: 1,
+      mood: 'none',
     };
     expect(isExtensionMessage(good)).toBe(true);
     expect(isExtensionMessage({ ...good, segments: [{ ...validSegment, kind: 'bogus' }] })).toBe(false);
     expect(isExtensionMessage({ ...good, speed: 'fast' })).toBe(false);
     expect(isExtensionMessage({ ...good, segments: 'nope' })).toBe(false);
+    expect(isExtensionMessage({ ...good, mood: 'euphoric' })).toBe(false);
+    expect(isExtensionMessage({ ...good, mood: undefined })).toBe(false);
+  });
+
+  it('accepts segments carrying emphasis and thematic-break metadata', () => {
+    const good = {
+      target: 'offscreen',
+      type: 'START_READING',
+      segments: [{ ...validSegment, emphasis: [[0, 5]], thematicBreakBefore: true }],
+      voiceId: 'v',
+      model: 's2.1-pro-free',
+      speed: 1,
+      mood: 'calm',
+    };
+    expect(isExtensionMessage(good)).toBe(true);
+    expect(isExtensionMessage({ ...good, segments: [{ ...validSegment, emphasis: [[0, 999]] }] })).toBe(false);
+    expect(isExtensionMessage({ ...good, segments: [{ ...validSegment, emphasis: 'x' }] })).toBe(false);
+    expect(isExtensionMessage({ ...good, segments: [{ ...validSegment, thematicBreakBefore: 'hr' }] })).toBe(false);
   });
 
   it('validates PLAYBACK_STATE status', () => {

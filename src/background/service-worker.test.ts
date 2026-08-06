@@ -8,6 +8,7 @@ const SAVED_SETTINGS: Record<string, unknown> = {
   'ishmael.voiceId': 'voice-ref',
   'ishmael.model': 's2.1-pro-free',
   'ishmael.speed': 1,
+  'ishmael.mood': 'calm',
 };
 
 const OFFSCREEN_URL = 'chrome-extension://test/offscreen.html';
@@ -70,11 +71,13 @@ function makeChrome(
   commandListeners: ((command: string) => void)[];
   messageListeners: RuntimeListener[];
   getContextsCalls: unknown[];
+  sentMessages: unknown[];
 } {
   const sessionWrites: unknown[] = [];
   const commandListeners: ((command: string) => void)[] = [];
   const messageListeners: RuntimeListener[] = [];
   const getContextsCalls: unknown[] = [];
+  const sentMessages: unknown[] = [];
   let documentCreated = false;
   const chrome: ChromeStub = {
     runtime: {
@@ -93,7 +96,10 @@ function makeChrome(
           : [];
       },
       ContextType: { OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT' },
-      sendMessage: options.sendMessage ?? defaultSendMessage,
+      sendMessage: async (message) => {
+        sentMessages.push(message);
+        return (options.sendMessage ?? defaultSendMessage)(message);
+      },
     },
     storage: {
       local: {
@@ -144,7 +150,7 @@ function makeChrome(
       Reason: { AUDIO_PLAYBACK: 'AUDIO_PLAYBACK' },
     },
   };
-  return { chrome, sessionWrites, commandListeners, messageListeners, getContextsCalls };
+  return { chrome, sessionWrites, commandListeners, messageListeners, getContextsCalls, sentMessages };
 }
 
 async function importBeginReading(): Promise<
@@ -299,6 +305,46 @@ describe('GET_API_KEY contract', () => {
     expect(result).toEqual({ ok: true });
     const serialized = JSON.stringify(sessionWrites);
     expect(serialized).not.toContain('test-key');
+  });
+});
+
+describe('mood across the message boundary', () => {
+  it('passes the saved mood through the START_READING message to the offscreen controller', async () => {
+    const { chrome, sentMessages } = makeChrome();
+    vi.stubGlobal('chrome', chrome);
+    const beginReading = await importBeginReading();
+
+    const result = await beginReading('page');
+    expect(result).toEqual({ ok: true });
+    const start = sentMessages.find((message) => {
+      return (
+        typeof message === 'object' &&
+        message !== null &&
+        (message as { type?: unknown }).type === 'START_READING'
+      );
+    }) as { mood?: unknown } | undefined;
+    expect(start?.mood).toBe('calm');
+  });
+
+  it('sanitizes a stored invalid mood to none before it leaves the service worker', async () => {
+    const { chrome, sentMessages } = makeChrome();
+    vi.stubGlobal('chrome', chrome);
+    const originalGet = chrome.storage.local.get;
+    chrome.storage.local.get = async () => ({ 'ishmael.mood': 'euphoric' });
+    const beginReading = await importBeginReading();
+
+    const result = await beginReading('page');
+    expect(result).toEqual({ ok: false, error: 'No Fish Audio API key saved. Add one in the voice settings.' });
+    expect(
+      sentMessages.some((message) => {
+        return (
+          typeof message === 'object' &&
+          message !== null &&
+          (message as { type?: unknown }).type === 'START_READING'
+        );
+      }),
+    ).toBe(false); // rejected before any session message (missing key)
+    chrome.storage.local.get = originalGet;
   });
 });
 

@@ -6,7 +6,7 @@
 // receiver.
 
 import { isNarrationSegments, type NarrationSegment } from './segments';
-import type { Settings } from './settings';
+import { MOODS, type Mood, type Settings } from './settings';
 import { sanitizePlaybackStatus, type PlaybackStatus } from './playback';
 import { isRecord } from './settings';
 
@@ -38,6 +38,7 @@ export type ExtensionMessage =
       voiceId: string;
       model: string;
       speed: number;
+      mood: Mood;
     }
   | { target: 'offscreen'; type: 'PLAY_PAUSE' }
   | { target: 'offscreen'; type: 'PREVIOUS' }
@@ -83,7 +84,8 @@ export function isExtensionMessage(value: unknown): value is ExtensionMessage {
         typeof value.voiceId === 'string' &&
         typeof value.model === 'string' &&
         typeof value.speed === 'number' &&
-        Number.isFinite(value.speed)
+        Number.isFinite(value.speed) &&
+        MOODS.includes(value.mood as Mood)
       );
     }
     return false;

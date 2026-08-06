@@ -51,3 +51,52 @@ describe('isNarrationSegment / isHeadingKind', () => {
     expect(isHeadingKind('paragraph')).toBe(false);
   });
 });
+
+describe('emphasis and thematic-break validation', () => {
+  it('accepts valid emphasis ranges within the text', () => {
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Bold words here.', emphasis: [[0, 4]] })).toBe(true);
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Bold words here.', emphasis: [[0, 4], [6, 11]] })).toBe(true);
+  });
+
+  it('rejects emphasis ranges that are out of bounds, reversed, fractional, or malformed', () => {
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Short.', emphasis: [[0, 99]] })).toBe(false);
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Short.', emphasis: [[2, 1]] })).toBe(false);
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Short.', emphasis: [[0.5, 2]] })).toBe(false);
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Short.', emphasis: 'nope' })).toBe(false);
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Short.', emphasis: [[0, 2, 3]] })).toBe(false);
+  });
+
+  it('requires thematicBreakBefore to be a boolean when present', () => {
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Text.', thematicBreakBefore: true })).toBe(true);
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Text.', thematicBreakBefore: 'yes' })).toBe(false);
+    expect(isNarrationSegment({ id: 'x', kind: 'paragraph', text: 'Text.', thematicBreakBefore: 1 })).toBe(false);
+  });
+});
+
+describe('dedupeSegments metadata', () => {
+  it('carries emphasis and thematic-break metadata through dedupe', () => {
+    const result = dedupeSegments([
+      { id: 'a', kind: 'paragraph', text: '  Bold  word.  ', emphasis: [[0, 4]], thematicBreakBefore: true },
+      { id: 'b', kind: 'paragraph', text: 'Bold word.' },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.text).toBe('Bold word.');
+    expect(result[0]?.thematicBreakBefore).toBe(true);
+    // The range is re-validated against the normalized text.
+    expect(result[0]?.emphasis).toEqual([[0, 4]]);
+  });
+
+  it('drops emphasis ranges that fall outside the normalized text', () => {
+    const result = dedupeSegments([{ id: 'a', kind: 'paragraph', text: '  x  ', emphasis: [[10, 12]] }]);
+    expect(result[0]?.emphasis).toBeUndefined();
+  });
+
+  it('keeps emphasis only from the first occurrence of duplicate text', () => {
+    const result = dedupeSegments([
+      { id: 'a', kind: 'paragraph', text: 'Same text', emphasis: [[0, 4]] },
+      { id: 'b', kind: 'paragraph', text: 'Same text', emphasis: [[5, 9]] },
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.emphasis).toEqual([[0, 4]]);
+  });
+});

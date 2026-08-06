@@ -109,6 +109,7 @@ describe('offscreen entry point without chrome.storage', () => {
         voiceId: 'voice-ref',
         model: 's2.1-pro-free',
         speed: 1,
+        mood: 'none',
       },
       {},
       (response) => {
@@ -144,6 +145,7 @@ describe('offscreen entry point without chrome.storage', () => {
         voiceId: 'voice-ref',
         model: 's2.1-pro-free',
         speed: 1,
+        mood: 'none',
       },
       {},
       (response) => {
@@ -156,5 +158,68 @@ describe('offscreen entry point without chrome.storage', () => {
       const payload = JSON.stringify(call[0]);
       expect(payload).not.toContain(BOUNDARY_KEY);
     }
+  });
+
+  it('sends decorated request text: mood cue before structural cues, never duplicated', async () => {
+    vi.resetModules();
+    await import('./audio');
+
+    const listener = listeners[0];
+    let ack: unknown;
+    listener?.(
+      {
+        target: 'offscreen',
+        type: 'START_READING',
+        segments: [
+          { id: 't-1', kind: 'title', text: 'Fixture title' },
+          { id: 'p-1', kind: 'paragraph', text: 'Body paragraph.' },
+        ],
+        voiceId: 'voice-ref',
+        model: 's2.1-pro-free',
+        speed: 1,
+        mood: 'happy',
+      },
+      {},
+      (response) => {
+        ack = response;
+      },
+    );
+    await vi.waitFor(() => expect(ack).toEqual({ ok: true }));
+
+    expect(fetchStub).toHaveBeenCalled();
+    const [url, init] = fetchStub.mock.calls[0] as [string, { body: string }];
+    expect(url).toBe(TTS_ENDPOINT);
+    const body = JSON.parse(init.body) as { text: string };
+    expect(body.text).toBe('[happy] [emphasis] Fixture title. [long-break]');
+    expect(body.text).not.toContain(BOUNDARY_KEY);
+  });
+
+  it('omits the mood cue entirely for none', async () => {
+    vi.resetModules();
+    await import('./audio');
+
+    const listener = listeners[0];
+    let ack: unknown;
+    listener?.(
+      {
+        target: 'offscreen',
+        type: 'START_READING',
+        segments: [{ id: 'p-1', kind: 'paragraph', text: 'Neutral narration.' }],
+        voiceId: 'voice-ref',
+        model: 's2.1-pro-free',
+        speed: 1,
+        mood: 'none',
+      },
+      {},
+      (response) => {
+        ack = response;
+      },
+    );
+    await vi.waitFor(() => expect(ack).toEqual({ ok: true }));
+
+    const [_, init] = fetchStub.mock.calls[0] as [string, { body: string }];
+    const body = JSON.parse(init.body) as { text: string };
+    expect(body.text).toBe('Neutral narration.');
+    expect(body.text).not.toContain('[none]');
   });
 });

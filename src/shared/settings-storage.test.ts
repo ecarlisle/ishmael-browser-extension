@@ -25,14 +25,20 @@ function fakeStorage(initial: Record<string, unknown> = {}): SettingsStorage & {
 describe('settings storage', () => {
   it('loads defaults when storage is empty', async () => {
     const storage = fakeStorage();
-    expect(await loadSettings(storage)).toEqual({ apiKey: '', voiceId: '', model: 's2.1-pro-free', speed: 1 });
+    expect(await loadSettings(storage)).toEqual({
+      apiKey: '',
+      voiceId: '',
+      model: 's2.1-pro-free',
+      speed: 1,
+      mood: 'none',
+    });
   });
 
   it('round-trips saved settings', async () => {
     const storage = fakeStorage();
-    await saveSettings(storage, { apiKey: 'key-123', voiceId: 'voice-456', model: 's2-pro', speed: 1.5 });
+    await saveSettings(storage, { apiKey: 'key-123', voiceId: 'voice-456', model: 's2-pro', speed: 1.5, mood: 'calm' });
     const loaded = await loadSettings(storage);
-    expect(loaded).toEqual({ apiKey: 'key-123', voiceId: 'voice-456', model: 's2-pro', speed: 1.5 });
+    expect(loaded).toEqual({ apiKey: 'key-123', voiceId: 'voice-456', model: 's2-pro', speed: 1.5, mood: 'calm' });
   });
 
   it('keeps a public-style voice-library reference ID unchanged across storage and loading', async () => {
@@ -44,6 +50,7 @@ describe('settings storage', () => {
       voiceId: publicVoiceId,
       model: 's2.1-pro-free',
       speed: 1,
+      mood: 'none',
     });
   });
 
@@ -53,6 +60,25 @@ describe('settings storage', () => {
     expect((await loadSettings(storage)).voiceId).toBe('voice-ref-123');
   });
 
+  it('migrates legacy stored settings without a mood value to none', async () => {
+    const storage = fakeStorage({ 'ishmael.voiceId': 'v', 'ishmael.speed': 1 });
+    const loaded = await loadSettings(storage);
+    expect(loaded.mood).toBe('none');
+    expect(loaded.voiceId).toBe('v');
+  });
+
+  it('sanitizes junk stored in the mood key to none', async () => {
+    const storage = fakeStorage({ 'ishmael.mood': 'bogus' });
+    expect((await loadSettings(storage)).mood).toBe('none');
+  });
+
+  it('persists the mood under the ishmael.* key namespace', async () => {
+    const storage = fakeStorage();
+    await saveSettings(storage, { mood: 'hopeful' });
+    expect(storage.data).toHaveProperty('ishmael.mood', 'hopeful');
+    expect(storage.data).not.toHaveProperty('mood');
+  });
+
   it('merges partial patches without losing existing values', async () => {
     const storage = fakeStorage();
     await saveSettings(storage, { voiceId: 'voice-1' });
@@ -60,6 +86,7 @@ describe('settings storage', () => {
     const loaded = await loadSettings(storage);
     expect(loaded.voiceId).toBe('voice-1');
     expect(loaded.speed).toBe(1.3);
+    expect(loaded.mood).toBe('none');
   });
 
   it('sanitizes junk stored directly in storage', async () => {
@@ -84,9 +111,9 @@ describe('settings storage', () => {
   });
 
   it('loadRedactedSettings hides the key value', async () => {
-    const storage = fakeStorage({ 'ishmael.apiKey': 'top-secret', 'ishmael.voiceId': 'v' });
+    const storage = fakeStorage({ 'ishmael.apiKey': 'top-secret', 'ishmael.voiceId': 'v', 'ishmael.mood': 'calm' });
     const redacted = await loadRedactedSettings(storage);
-    expect(redacted).toEqual({ hasApiKey: true, voiceId: 'v', model: 's2.1-pro-free', speed: 1 });
+    expect(redacted).toEqual({ hasApiKey: true, voiceId: 'v', model: 's2.1-pro-free', speed: 1, mood: 'calm' });
     expect(JSON.stringify(redacted)).not.toContain('top-secret');
   });
 });

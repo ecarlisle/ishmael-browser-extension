@@ -85,6 +85,31 @@
           </div>
 
           <div class="field">
+            <label for="mood">Mood</label>
+            <select id="mood" aria-describedby="mood-hint">
+              <option value="none">None</option>
+              <option value="calm">Calm</option>
+              <option value="happy">Happy</option>
+              <option value="sad">Sad</option>
+              <option value="excited">Excited</option>
+              <option value="confident">Confident</option>
+              <option value="curious">Curious</option>
+              <option value="empathetic">Empathetic</option>
+              <option value="relaxed">Relaxed</option>
+              <option value="hopeful">Hopeful</option>
+              <option value="nostalgic">Nostalgic</option>
+              <option value="serious">Serious</option>
+              <option value="nervous">Nervous</option>
+              <option value="worried">Worried</option>
+              <option value="angry">Angry</option>
+              <option value="sarcastic">Sarcastic</option>
+            </select>
+            <p id="mood-hint" class="hint">
+              Applies one mood to the entire reading. None preserves the page's natural tone.
+            </p>
+          </div>
+
+          <div class="field">
             <div class="speed-label">
               <label for="speed">Speed</label>
               <output id="speed-value" for="speed">1.0×</output>

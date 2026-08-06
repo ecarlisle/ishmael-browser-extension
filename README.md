@@ -27,6 +27,60 @@ analytics, no hosted backend, no voice cloning, no cloud history.
 10. Use the keyboard shortcuts **Alt+Shift+R** (read page) and **Alt+Shift+S**
     (read selection) — even with the popup closed; see
     [Keyboard shortcuts](#keyboard-shortcuts).
+11. Choose an optional **Mood** (Calm, Happy, Sad, …) in the voice settings to
+    give the whole reading one consistent tone; **None** preserves the page's
+    natural tone. See [Narration tags and Mood](#narration-tags-and-mood).
+
+## Narration tags and Mood
+
+Ishmael sends each narration request as the page's own words plus a small set
+of Fish Audio cue tags that shape pacing and tone. Cues are a decoration layer:
+they exist only in the in-memory request text and are never written into stored
+content or narration history.
+
+**Mood (user setting).** The voice settings include a **Mood** select with 16
+options: `None` (default, also for existing users), Calm, Happy, Sad, Excited,
+Confident, Curious, Empathetic, Relaxed, Hopeful, Nostalgic, Serious, Nervous,
+Worried, Angry, and Sarcastic. The mood applies one cue (for example
+`[happy]`) to the start of **every** independently synthesized request — Read
+page and Read selection alike — because each chunk is a separate Fish call.
+`None` adds no cue at all (never `[none]` or `[neutral]`). The mood is saved
+with the other voice settings and restored when the popup reopens.
+
+**Structural cues (automatic).** Derived deterministically from the page, never
+from an inferred emotion:
+
+- Title → `[emphasis] … [long-break]`
+- Headings → `[emphasis] … [break]`
+- Paragraph boundaries → `[break]` (also when short paragraphs are merged into
+  one request; never a false break between the split pieces of one long
+  paragraph, never a dangling pause at the end of the reading)
+- Blockquotes → `[soft tone] …`
+- List items → `[break]` between items only
+- Figure captions → `[soft tone] …`, plus `[break]` when regular content follows
+  (never between adjacent captions)
+- Inline `<strong>`/`<em>` phrases → `[emphasis]` immediately before the phrase
+  (`<b>`/`<i>`, CSS, links, and uppercase text are ignored)
+- `<hr>` → `[long-break]` attached to the preceding spoken chunk, so no
+  tag-only request is ever produced
+
+Composition is ordered: the mood cue (if any) comes first, then structural
+cues, then the unchanged source text — e.g.
+`[happy] [emphasis] Page title. [long-break]`. Tags are never duplicated or
+malformed, and square brackets already present on the page are preserved
+verbatim.
+
+**Cross-file pauses.** In-request boundaries are handled by Fish tags inside
+one MP3. Between two separate audio files at a semantic boundary, Ishmael
+holds a short local pause (`INTER_CHUNK_PAUSE_MS`, 250 ms) — but only where the
+previous chunk's own audio does not already end with a synthesized tag, so a
+boundary is never signaled twice. No pause occurs between pieces of the same
+long paragraph. The pause is cancellable: Stop, Previous, Next, Pause, and any
+new session abort it immediately, and a stale timer can never begin audio.
+
+**Read selection** applies the mood and inline emphasis only when the browser
+can retain it reliably (page extraction only), with no title, heading, or
+structural cues.
 
 ## Current prototype limitations
 
@@ -308,6 +362,18 @@ settings handling. Extension runtime behavior is best verified manually:
 15. With the popup closed, make a shortcut fail (for example remove the API
     key first): reopen the popup and confirm it explains the failure instead
     of silently showing no session.
+16. Set **Mood** to **Happy** and read a page: every chunk should carry the
+    same consistent tone (the popup's mood choice persists after closing and
+    reopening the popup). Set it back to **None** and read again: narration
+    should return to the page's natural tone with no extra cue.
+17. Read a page with headings, paragraphs, a blockquote, a list, a figure
+    caption, and a `<hr>`: headings should be emphasized with a pause after
+    them, blockquotes and captions should sound softer, and the `<hr>` should
+    produce a noticeably longer pause — with no long pause at the very end of
+    the reading.
+18. Select a few sentences on a page and read the selection with a mood
+    selected: the mood applies, but no title/heading emphasis or trailing
+    pause is added.
 
 ## Privacy and API-key limitations
 
@@ -372,12 +438,14 @@ messages; the content script never sees the API key.
 | `src/popup/status-tone.ts` | Status → tone/ARIA-role mapping for popup status text |
 | `src/background/service-worker.ts`, `src/background/start-reading.ts` | MV3 service worker + offscreen lifecycle (`runtime.getContexts`), readiness handshake, and validated START_READING acknowledgement |
 | `src/offscreen/offscreen-boundary.test.ts` | Regression test proving the offscreen entry point works without `chrome.storage` |
+| `src/offscreen/pause-boundary.test.ts` | Inter-file pause mechanism: cancellable, never stale, never combined with Fish tags |
 | `src/background/commands.ts` | Keyboard-command → narration-source mapping |
 | `src/content/extract.ts`, `src/content/extract-core.ts` | Content script + pure extraction logic |
 | `src/offscreen/audio.ts`, `src/offscreen/audio-core.ts` | Offscreen audio controller + pure helpers (request shaping, in-flight registry, URL cache) |
 | `src/shared/messages.ts` | Message contract + validators |
-| `src/shared/segments.ts`, `src/shared/normalize.ts` | Segment types, dedupe, normalization |
-| `src/shared/chunking.ts` | Sentence-aware chunking |
+| `src/shared/segments.ts`, `src/shared/normalize.ts` | Segment types, emphasis ranges, thematic-break metadata, dedupe, normalization |
+| `src/shared/chunking.ts` | Sentence-aware chunking; parts carry boundary + emphasis metadata across merges/splits |
+| `src/shared/decorate.ts` | Decoration layer: mood cue, structural tags, cross-file pause decisions |
 | `src/shared/playback.ts` | Playback-state types |
 | `src/shared/errors.ts` | Fish error mapping |
 | `src/shared/settings.ts`, `src/shared/settings-storage.ts` | Settings + storage wrapper |

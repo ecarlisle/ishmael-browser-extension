@@ -3,7 +3,7 @@
 
 import './popup.css';
 import { isExtensionMessage, type ExtensionMessage } from '../shared/messages';
-import type { RedactedSettings } from '../shared/settings';
+import type { Mood, RedactedSettings } from '../shared/settings';
 import { createIdleStatus, type PlaybackStatus } from '../shared/playback';
 import { applyStatusTone, type StatusKind } from './status-tone';
 
@@ -22,6 +22,7 @@ const elements = {
   removeKey: byId<HTMLButtonElement>('remove-key'),
   voiceId: byId<HTMLInputElement>('voice-id'),
   model: byId<HTMLSelectElement>('model'),
+  mood: byId<HTMLSelectElement>('mood'),
   speed: byId<HTMLInputElement>('speed'),
   speedValue: byId<HTMLOutputElement>('speed-value'),
   saveVoice: byId<HTMLButtonElement>('save-voice'),
@@ -69,6 +70,7 @@ function clearStatus(): void {
 function renderSettings(settings: RedactedSettings): void {
   elements.voiceId.value = settings.voiceId;
   elements.model.value = settings.model;
+  elements.mood.value = settings.mood;
   elements.speed.value = String(settings.speed);
   elements.speedValue.value = `${settings.speed}×`;
 
@@ -189,7 +191,11 @@ async function saveVoice(): Promise<void> {
     await send({
       target: 'service-worker',
       type: 'SAVE_SETTINGS',
-      patch: { voiceId, model: elements.model.value as RedactedSettings['model'] },
+      patch: {
+        voiceId,
+        model: elements.model.value as RedactedSettings['model'],
+        mood: elements.mood.value as Mood,
+      },
     });
     setStatus('Voice settings saved.', 'success');
   } catch {

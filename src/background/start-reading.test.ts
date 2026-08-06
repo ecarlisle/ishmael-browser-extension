@@ -17,6 +17,7 @@ const startMessage: Extract<ExtensionMessage, { type: 'START_READING' }> = {
   voiceId: 'voice-ref',
   model: 's2.1-pro-free',
   speed: 1,
+  mood: 'none',
 };
 
 const noDelay = async (): Promise<void> => undefined;
