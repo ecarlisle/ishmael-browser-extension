@@ -16,7 +16,7 @@ function byId<T extends HTMLElement>(id: string): T {
 const elements = {
   apiKey: byId<HTMLInputElement>('api-key'),
   saveKey: byId<HTMLButtonElement>('save-key'),
-  keyState: byId<HTMLParagraphElement>('key-state'),
+  keyState: byId<HTMLSpanElement>('key-state'),
   keyActions: byId<HTMLDivElement>('key-actions'),
   replaceKey: byId<HTMLButtonElement>('replace-key'),
   removeKey: byId<HTMLButtonElement>('remove-key'),
@@ -26,7 +26,10 @@ const elements = {
   speed: byId<HTMLInputElement>('speed'),
   speedValue: byId<HTMLOutputElement>('speed-value'),
   saveVoice: byId<HTMLButtonElement>('save-voice'),
-  voiceSettings: byId<HTMLDetailsElement>('voice-settings'),
+  tabListen: byId<HTMLButtonElement>('tab-listen'),
+  tabSettings: byId<HTMLButtonElement>('tab-settings'),
+  panelListen: byId<HTMLElement>('panel-listen'),
+  panelSettings: byId<HTMLElement>('panel-settings'),
   settingsSummaryNote: byId<HTMLSpanElement>('settings-summary-note'),
   readPage: byId<HTMLButtonElement>('read-page'),
   readSelection: byId<HTMLButtonElement>('read-selection'),
@@ -37,6 +40,43 @@ const elements = {
   segmentInfo: byId<HTMLParagraphElement>('segment-info'),
   status: byId<HTMLParagraphElement>('status'),
 };
+
+/** The two popup views in tab order (roving tabindex, see selectTab). */
+const tabs: ReadonlyArray<HTMLButtonElement> = [elements.tabListen, elements.tabSettings];
+
+/** True once the API key and reference ID are both saved (drives the default view). */
+let setupComplete = false;
+
+/**
+ * Switches the popup to the given view. Inactive tabs stay in the tab order
+ * only via arrow keys (WAI-ARIA tabs pattern); panels are hidden/shown.
+ */
+function selectTab(tab: HTMLButtonElement): void {
+  for (const candidate of tabs) {
+    const selected = candidate === tab;
+    candidate.setAttribute('aria-selected', String(selected));
+    candidate.tabIndex = selected ? 0 : -1;
+  }
+  elements.panelListen.hidden = tab !== elements.tabListen;
+  elements.panelSettings.hidden = tab !== elements.tabSettings;
+}
+
+/** Arrow/Home/End navigation between the Listen and Voice Settings tabs. */
+function onTabKeyDown(event: KeyboardEvent): void {
+  const activeIndex = tabs.indexOf(document.activeElement as HTMLButtonElement);
+  if (activeIndex === -1) return;
+  let next = activeIndex;
+  if (event.key === 'ArrowRight') next = (activeIndex + 1) % tabs.length;
+  else if (event.key === 'ArrowLeft') next = (activeIndex - 1 + tabs.length) % tabs.length;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = tabs.length - 1;
+  else return;
+  event.preventDefault();
+  const target = tabs[next];
+  if (!target) return;
+  selectTab(target);
+  target.focus();
+}
 
 function send<T>(message: ExtensionMessage): Promise<T> {
   return chrome.runtime.sendMessage(message) as Promise<T>;
@@ -74,11 +114,10 @@ function renderSettings(settings: RedactedSettings): void {
   elements.speed.value = String(settings.speed);
   elements.speedValue.value = `${settings.speed}×`;
 
-  // Keep Voice settings collapsed once the API key and reference ID are
-  // configured; open them automatically when either is missing.
-  const configured = settings.hasApiKey && settings.voiceId.trim().length > 0;
-  elements.voiceSettings.open = !configured;
-  elements.settingsSummaryNote.textContent = configured ? 'Configured — click to change' : 'Setup required';
+  // The tab note mirrors setup state: the popup defaults to Voice Settings
+  // when the key or reference ID is still missing (see init).
+  setupComplete = settings.hasApiKey && settings.voiceId.trim().length > 0;
+  elements.settingsSummaryNote.textContent = setupComplete ? 'Configured' : 'Setup required';
 
   if (settings.hasApiKey) {
     elements.apiKey.placeholder = 'Key is saved — enter a new one to replace it';
@@ -238,6 +277,10 @@ async function refreshStatus(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function wire(): void {
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => selectTab(tab));
+    tab.addEventListener('keydown', onTabKeyDown);
+  }
   elements.apiKey.addEventListener('input', () => {
     elements.saveKey.disabled = elements.apiKey.value.trim().length === 0;
   });
@@ -270,6 +313,9 @@ async function init(): Promise<void> {
   renderStatus(createIdleStatus());
   try {
     await refreshSettings();
+    // Open on Voice Settings while setup is incomplete, like the old
+    // auto-expanded disclosure; the user controls the view from then on.
+    if (!setupComplete) selectTab(elements.tabSettings);
     await refreshStatus();
   } catch {
     showError('Could not reach the extension. Reopen the popup and try again.');

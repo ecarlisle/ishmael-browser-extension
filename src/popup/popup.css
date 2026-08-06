@@ -1,4 +1,9 @@
-/* Ishmael popup — quiet, compact, legible. */
+/* Ishmael popup — quiet, compact, legible.
+ *
+ * The popup is one fixed-size window (340×600) with two internal views
+ * (Listen / Voice Settings) switched by a tab bar. Every view shares the
+ * same frame, so the popup never resizes when the user navigates.
+ */
 
 :root {
   --bg: #f7f6f3;
@@ -19,6 +24,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -26,12 +35,21 @@ body {
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* Fixed frame: both views use the same width and height. */
 .popup {
   width: 340px;
-  padding: 16px;
+  height: 600px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+}
+
+.popup__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .popup__header h1 {
@@ -41,74 +59,78 @@ body {
 }
 
 .popup__tagline {
-  margin: 2px 0 0;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.card h2 {
   margin: 0;
+  color: var(--text-muted);
   font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
 }
 
-/* Collapsible Voice settings: native <details>/<summary> disclosure. */
-.card--collapsible {
-  display: block;
-  padding: 0;
-}
-
-.card--collapsible > summary {
+/* Tab bar: segmented control for the two views (WAI-ARIA tabs pattern). */
+.tabs {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 12px;
+  gap: 4px;
+  padding: 4px;
+  background: #ecebe6;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  border-radius: 10px;
-  list-style-position: inside;
 }
 
-.card--collapsible > summary::-webkit-details-marker {
-  display: inline-block;
+.tab[aria-selected="true"] {
+  background: var(--card);
+  color: var(--accent-strong);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-.card--collapsible > summary:focus-visible {
+.tab:hover:not([aria-selected="true"]) {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.tab:focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: -2px;
-  border-radius: 10px;
+  outline-offset: 1px;
 }
 
-.card--collapsible > summary:hover {
-  background: var(--accent-soft);
-}
-
-.summary-note {
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
+.tab-note {
+  font-size: 10px;
+  font-weight: 500;
   color: var(--text-muted);
 }
 
-.settings-body {
+/* View panels share one flexible area; they scroll only if the window is
+ * unusually short (never clipped). */
+.panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#panel-listen {
+  justify-content: center;
+}
+
+.listen {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 12px 12px;
-  border-top: 1px solid var(--border);
 }
 
 .field {
@@ -122,10 +144,42 @@ body {
   font-weight: 600;
 }
 
-.hint {
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.help-list {
   margin: 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* Compact settings help: secondary explanatory text, one disclosure away. */
+.help {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.help summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help summary::-webkit-details-marker {
+  margin-right: 4px;
+}
+
+.help-list {
+  padding-left: 18px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.help-list strong {
+  color: var(--text);
 }
 
 .key-state {
@@ -144,6 +198,10 @@ body {
 .row input {
   flex: 1;
   min-width: 0;
+}
+
+.key-row {
+  justify-content: space-between;
 }
 
 .transport {
@@ -218,7 +276,8 @@ button:disabled {
 
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+summary:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
@@ -237,10 +296,6 @@ select:focus-visible {
   border-radius: 8px;
   padding: 8px 10px;
   border: 1px solid transparent;
-}
-
-.status[hidden] {
-  display: none;
 }
 
 /* Error: pale rose background, dark red text — never green. */
@@ -268,11 +323,36 @@ select:focus-visible {
   margin: 0;
 }
 
-.privacy-note {
-  margin: 0;
+.privacy {
   font-size: 11.5px;
   color: var(--text-muted);
+}
+
+.privacy summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.privacy summary::-webkit-details-marker {
+  margin-right: 4px;
+}
+
+.privacy-note {
+  margin: 4px 0 0;
   line-height: 1.5;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
