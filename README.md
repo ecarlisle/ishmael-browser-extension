@@ -75,6 +75,29 @@ This runs three Vite builds into `dist/`:
 The build also copies `public/` (manifest, icons, offscreen page) into `dist/`,
 so `dist/` is the unpacked extension directory.
 
+## Icon
+
+The extension icon is an original white sperm-whale silhouette (broad squared
+head, raised fluked tail) on a deep ocean-teal circle, in the same flat palette
+as the popup (`#115e59` field, `#ffffff` whale). It is the same mark at every
+size; the small sizes are produced by area-average downsampling of the design,
+so there is nothing to blur away.
+
+* Editable source: `design/ishmael-icon.svg`
+* Rasterized 512px master: `design/ishmael-icon-master.png` (committed)
+* Generated files: `public/icons/icon{16,32,48,128}.png`
+* Preview sheet: `design/ishmael-icon-contact-sheet.png`
+* Regenerate after changing the design:
+
+```sh
+magick -background none -density 144 design/ishmael-icon.svg \
+  -resize 512x512 -depth 8 design/ishmael-icon-master.png
+pnpm icons
+```
+
+The generated PNGs are committed, so the extension build does not require
+ImageMagick or any icon step.
+
 ## Run tests
 
 ```sh
@@ -360,8 +383,12 @@ messages; the content script never sees the API key.
 | `src/shared/settings.ts`, `src/shared/settings-storage.ts` | Settings + storage wrapper |
 | `public/manifest.json` | Extension manifest |
 | `public/offscreen.html` | Offscreen document shell |
-| `public/icons/` | Generated extension icons |
+| `public/icons/` | Generated extension icons (16/32/48/128) |
+| `design/ishmael-icon.svg` | Editable source for the Ishmael white-whale icon |
+| `design/ishmael-icon-master.png` | Committed 512px rasterization of the icon source |
+| `design/ishmael-icon-contact-sheet.png` | 16/32/48/128 previews at true size and zoomed, on light and dark panels |
 | `scripts/build.mjs` | Orchestrates the three Vite builds |
-| `scripts/generate-icons.mjs` | Dependency-free PNG icon generator |
+| `scripts/render-icons.mjs` | Dependency-free icon renderer (area-average downsample + PNG encode) |
+| `scripts/png-encode.mjs` | Dependency-free PNG encoder shared by icon scripts |
 | `vite.config.ts`, `vite.content.config.ts`, `vite.offscreen.config.ts` | Build configs |
 | `vitest.config.ts`, `tsconfig.json` | Test and type-check configs |
