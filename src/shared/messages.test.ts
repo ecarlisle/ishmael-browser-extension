@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isExtensionMessage, isExtractionResult, isPongResponse } from './messages';
+import {
+  isApiKeyResponse,
+  isExtensionMessage,
+  isExtractionResult,
+  isPongResponse,
+  isStartReadingAck,
+} from './messages';
 import { createIdleStatus } from './playback';
 
 const validSegment = { id: 'p-1', kind: 'paragraph', text: 'Hello.' };
@@ -67,5 +73,40 @@ describe('isPongResponse', () => {
     expect(isPongResponse({ type: 'PONG', status: createIdleStatus() })).toBe(true);
     expect(isPongResponse({ type: 'PONG', status: { phase: 'bogus' } })).toBe(false);
     expect(isPongResponse({ type: 'OTHER' })).toBe(false);
+  });
+});
+
+describe('isStartReadingAck', () => {
+  it('accepts success and failure acknowledgements', () => {
+    expect(isStartReadingAck({ ok: true })).toBe(true);
+    expect(isStartReadingAck({ ok: false, error: 'No API key saved.' })).toBe(true);
+  });
+
+  it('rejects malformed acknowledgements', () => {
+    expect(isStartReadingAck({ ok: 'yes' })).toBe(false);
+    expect(isStartReadingAck({ ok: false, error: '' })).toBe(false);
+    expect(isStartReadingAck({ ok: true, extra: 1 })).toBe(true);
+    expect(isStartReadingAck(null)).toBe(false);
+    expect(isStartReadingAck({})).toBe(false);
+  });
+});
+
+describe('isApiKeyResponse', () => {
+  it('accepts a success response carrying the key and a redacted failure', () => {
+    expect(isApiKeyResponse({ ok: true, apiKey: 'fish-key' })).toBe(true);
+    expect(isApiKeyResponse({ ok: false, error: 'No Fish Audio API key saved.' })).toBe(true);
+  });
+
+  it('rejects malformed responses', () => {
+    expect(isApiKeyResponse({ ok: true, apiKey: '' })).toBe(false);
+    expect(isApiKeyResponse({ ok: true })).toBe(false);
+    expect(isApiKeyResponse({ ok: false, error: '' })).toBe(false);
+    expect(isApiKeyResponse({ ok: 'yes', apiKey: 'x' })).toBe(false);
+    expect(isApiKeyResponse(null)).toBe(false);
+    expect(isApiKeyResponse({})).toBe(false);
+  });
+
+  it('accepts GET_API_KEY as an extension message without any payload', () => {
+    expect(isExtensionMessage({ target: 'service-worker', type: 'GET_API_KEY' })).toBe(true);
   });
 });

@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "node scripts/build.mjs",
-    "icons": "node scripts/generate-icons.mjs",
+    "icons": "node scripts/render-icons.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

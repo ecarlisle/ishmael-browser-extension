@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import {
+  collectSegmentsFromRoot,
   extractFromDocument,
   extractFromFallback,
   extractSelectionFromDocument,
@@ -133,6 +134,74 @@ describe('no-content handling', () => {
     const document = new JSDOM('<!doctype html><html><head></head><body></body></html>').window.document;
     const result = extractFromDocument(document);
     expect(result).toEqual({ ok: false, code: 'no-content', message: expect.any(String) });
+  });
+});
+
+describe('hidden-subtree handling (no truncation)', () => {
+  const HIDDEN_LAST_CHILD = `
+    <main>
+      <section>
+        <div hidden>Do not read this</div>
+      </section>
+      <p>This paragraph must still be read.</p>
+    </main>
+  `;
+
+  it('continues past a hidden element that is the last child of a nested container', () => {
+    const main = documentFrom(HIDDEN_LAST_CHILD).querySelector('main') as Element;
+    const segments = collectSegmentsFromRoot(main, false);
+    expect(segments.map((s) => s.text)).toEqual(['This paragraph must still be read.']);
+    expect(segments.some((s) => s.text.includes('Do not read'))).toBe(false);
+  });
+
+  it('keeps the later outer content on the live fallback path too', () => {
+    const result = extractFromFallback(documentFrom(HIDDEN_LAST_CHILD));
+    expect(result).not.toBeNull();
+    const texts = (result ?? []).map((s) => s.text);
+    expect(texts).toContain('This paragraph must still be read.');
+    expect(texts.join(' ')).not.toContain('Do not read');
+    // Title first, then the outer paragraph: nothing silently truncated.
+    expect(texts).toEqual(['Fixture', 'This paragraph must still be read.']);
+  });
+
+  it('skips an excluded nav as the final child of a nested container', () => {
+    const main = documentFrom(`
+      <main>
+        <section>
+          <nav>Menu links</nav>
+        </section>
+        <p>Outer readable paragraph.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const segments = collectSegmentsFromRoot(main, false);
+    expect(segments.map((s) => s.text)).toEqual(['Outer readable paragraph.']);
+  });
+
+  it('skips an aria-hidden subtree as the final child of a nested container', () => {
+    const main = documentFrom(`
+      <main>
+        <section>
+          <p aria-hidden="true">Ignored text.</p>
+        </section>
+        <p>Readable after aria-hidden.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const segments = collectSegmentsFromRoot(main, false);
+    expect(segments.map((s) => s.text)).toEqual(['Readable after aria-hidden.']);
+  });
+
+  it('preserves document order around an interior hidden subtree', () => {
+    const main = documentFrom(`
+      <main>
+        <p>Before.</p>
+        <section>
+          <form>Form junk.</form>
+        </section>
+        <p>After.</p>
+      </main>
+    `).querySelector('main') as Element;
+    const segments = collectSegmentsFromRoot(main, false);
+    expect(segments.map((s) => s.text)).toEqual(['Before.', 'After.']);
   });
 });
 

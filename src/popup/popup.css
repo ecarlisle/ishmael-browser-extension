@@ -64,6 +64,53 @@ body {
   color: var(--text-muted);
 }
 
+/* Collapsible Voice settings: native <details>/<summary> disclosure. */
+.card--collapsible {
+  display: block;
+  padding: 0;
+}
+
+.card--collapsible > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  cursor: pointer;
+  border-radius: 10px;
+  list-style-position: inside;
+}
+
+.card--collapsible > summary::-webkit-details-marker {
+  display: inline-block;
+}
+
+.card--collapsible > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+
+.card--collapsible > summary:hover {
+  background: var(--accent-soft);
+}
+
+.summary-note {
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -189,8 +236,32 @@ select:focus-visible {
   font-size: 13px;
   border-radius: 8px;
   padding: 8px 10px;
+  border: 1px solid transparent;
+}
+
+.status[hidden] {
+  display: none;
+}
+
+/* Error: pale rose background, dark red text — never green. */
+.status--error {
+  background: #fdecea;
+  border-color: #f0b4ae;
+  color: #a1260d;
+}
+
+/* Success: existing green treatment. */
+.status--success {
   background: var(--accent-soft);
-  color: var(--text);
+  border-color: #c4e2dd;
+  color: var(--accent-strong);
+}
+
+/* Loading/information: neutral blue-gray, not alarming. */
+.status--info {
+  background: #eef2f7;
+  border-color: #d6dee8;
+  color: #2f3a4b;
 }
 
 .popup__footer {

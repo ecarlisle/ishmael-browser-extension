@@ -79,20 +79,24 @@ function nextSegmentId(kind: SegmentKind): string {
 /**
  * Walks `root` in document order and collects narration segments. Nested
  * candidates (e.g. a <p> inside an <li>) are skipped so their text is only
- * captured by the outermost candidate. Hidden subtrees are skipped entirely.
+ * captured by the outermost candidate.
+ *
+ * Hidden/excluded subtrees are rejected through the TreeWalker filter:
+ * `FILTER_REJECT` skips the element and its entire subtree, so a hidden
+ * element that is the last child of a nested container cannot terminate the
+ * walk — traversal continues with the next eligible node in document order.
  */
 export function collectSegmentsFromRoot(root: Element, isLive: boolean): NarrationSegment[] {
   const doc = root.ownerDocument;
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+    acceptNode(node: Node): number {
+      return isHidden(node as Element, isLive) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    },
+  });
   const segments: NarrationSegment[] = [];
 
   let element = walker.nextNode() as Element | null;
   while (element) {
-    if (isHidden(element, isLive)) {
-      walker.currentNode = element;
-      element = walker.nextSibling() as Element | null;
-      continue;
-    }
     const kind = kindForElement(element);
     const nestedInCandidate = element.parentElement?.closest(CANDIDATE_SELECTOR) ?? null;
     const insideRoot = nestedInCandidate !== null && root.contains(nestedInCandidate);

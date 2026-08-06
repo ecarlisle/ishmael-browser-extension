@@ -35,6 +35,24 @@ describe('settings storage', () => {
     expect(loaded).toEqual({ apiKey: 'key-123', voiceId: 'voice-456', model: 's2-pro', speed: 1.5 });
   });
 
+  it('keeps a public-style voice-library reference ID unchanged across storage and loading', async () => {
+    const storage = fakeStorage();
+    const publicVoiceId = '0d6f1a2b3c4d5e6f7a8b9c0d';
+    await saveSettings(storage, { voiceId: publicVoiceId });
+    expect(await loadSettings(storage)).toEqual({
+      apiKey: '',
+      voiceId: publicVoiceId,
+      model: 's2.1-pro-free',
+      speed: 1,
+    });
+  });
+
+  it('trims surrounding whitespace when saving a reference ID', async () => {
+    const storage = fakeStorage();
+    await saveSettings(storage, { voiceId: '  voice-ref-123  ' });
+    expect((await loadSettings(storage)).voiceId).toBe('voice-ref-123');
+  });
+
   it('merges partial patches without losing existing values', async () => {
     const storage = fakeStorage();
     await saveSettings(storage, { voiceId: 'voice-1' });
