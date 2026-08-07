@@ -7,3 +7,6 @@ dist/
 # Logs and OS noise
 *.log
 .DS_Store
+
+# Environment files
+.env.*
