@@ -166,7 +166,7 @@ afterEach(() => {
 });
 
 describe('beginReading startup handshake', () => {
-  it('caches a loading state only after the offscreen controller acknowledges (page)', async () => {
+  it('caches preparing while extraction runs and never claims a loading state (page)', async () => {
     const { chrome, sessionWrites } = makeChrome();
     vi.stubGlobal('chrome', chrome);
     const beginReading = await importBeginReading();
@@ -175,8 +175,11 @@ describe('beginReading startup handshake', () => {
     expect(result).toEqual({ ok: true });
     expect(sessionWrites).toHaveLength(1);
     expect(sessionWrites[0]).toEqual({
-      'ishmael.playbackStatus': { phase: 'loading', index: 0, total: 1, speed: 1 },
+      'ishmael.playbackStatus': { phase: 'preparing', index: 0, total: 0, speed: 1 },
     });
+    // The success path never wrote the legacy 'loading' phase: after the
+    // handshake, the offscreen broadcasts drive the cached status.
+    expect(JSON.stringify(sessionWrites)).not.toContain('"loading"');
   });
 
   it('uses the same corrected startup path for the selection command', async () => {
@@ -188,11 +191,11 @@ describe('beginReading startup handshake', () => {
     expect(result).toEqual({ ok: true });
     expect(sessionWrites).toHaveLength(1);
     expect(sessionWrites[0]).toEqual({
-      'ishmael.playbackStatus': { phase: 'loading', index: 0, total: 1, speed: 1 },
+      'ishmael.playbackStatus': { phase: 'preparing', index: 0, total: 0, speed: 1 },
     });
   });
 
-  it('does not cache a loading state when the controller rejects the session', async () => {
+  it('caches the error when the controller rejects the session', async () => {
     const { chrome, sessionWrites } = makeChrome({
       sendMessage: async (message) => {
         if (message && typeof message === 'object' && 'type' in message) {
@@ -208,10 +211,16 @@ describe('beginReading startup handshake', () => {
 
     const result = await beginReading('page');
     expect(result).toEqual({ ok: false, error: 'Rejected.' });
-    expect(sessionWrites).toHaveLength(0);
+    expect(sessionWrites).toHaveLength(2);
+    expect(sessionWrites[0]).toEqual({
+      'ishmael.playbackStatus': { phase: 'preparing', index: 0, total: 0, speed: 1 },
+    });
+    expect(sessionWrites[1]).toEqual({
+      'ishmael.playbackStatus': { phase: 'error', index: 0, total: 0, speed: 1, error: 'Rejected.' },
+    });
   });
 
-  it('does not cache a loading state when START_READING is never acknowledged', async () => {
+  it('caches the error when START_READING is never acknowledged', async () => {
     const { chrome, sessionWrites } = makeChrome({
       sendMessage: async (message) => {
         if (message && typeof message === 'object' && 'type' in message) {
@@ -229,7 +238,16 @@ describe('beginReading startup handshake', () => {
       ok: false,
       error: 'Background audio did not start. Check the service worker and offscreen consoles, then reload the extension.',
     });
-    expect(sessionWrites).toHaveLength(0);
+    expect(sessionWrites).toHaveLength(2);
+    expect(sessionWrites[1]).toEqual({
+      'ishmael.playbackStatus': {
+        phase: 'error',
+        index: 0,
+        total: 0,
+        speed: 1,
+        error: 'Background audio did not start. Check the service worker and offscreen consoles, then reload the extension.',
+      },
+    });
   });
 
   it('reports a distinct error and logs a safe diagnostic when the offscreen document cannot be created', async () => {
@@ -247,7 +265,16 @@ describe('beginReading startup handshake', () => {
       ok: false,
       error: 'Could not create the background audio page. Check the service worker console, then reload the extension.',
     });
-    expect(sessionWrites).toHaveLength(0);
+    expect(sessionWrites).toHaveLength(2);
+    expect(sessionWrites[1]).toEqual({
+      'ishmael.playbackStatus': {
+        phase: 'error',
+        index: 0,
+        total: 0,
+        speed: 1,
+        error: 'Could not create the background audio page. Check the service worker console, then reload the extension.',
+      },
+    });
     expect(warn).toHaveBeenCalledWith('[ishmael] offscreen startup failed', { problem: 'create-failed' });
   });
 
@@ -357,7 +384,7 @@ describe('keyboard shortcuts', () => {
     commandListeners[0]?.('read-page');
     await vi.waitFor(() => expect(sessionWrites).toHaveLength(1));
     expect(sessionWrites[0]).toEqual({
-      'ishmael.playbackStatus': { phase: 'loading', index: 0, total: 1, speed: 1 },
+      'ishmael.playbackStatus': { phase: 'preparing', index: 0, total: 0, speed: 1 },
     });
   });
 
@@ -369,7 +396,7 @@ describe('keyboard shortcuts', () => {
     commandListeners[0]?.('read-selection');
     await vi.waitFor(() => expect(sessionWrites).toHaveLength(1));
     expect(sessionWrites[0]).toEqual({
-      'ishmael.playbackStatus': { phase: 'loading', index: 0, total: 1, speed: 1 },
+      'ishmael.playbackStatus': { phase: 'preparing', index: 0, total: 0, speed: 1 },
     });
   });
 
@@ -398,8 +425,8 @@ describe('keyboard shortcuts', () => {
     await importBeginReading();
 
     commandListeners[0]?.('read-page');
-    await vi.waitFor(() => expect(sessionWrites).toHaveLength(1));
-    expect(sessionWrites[0]).toEqual({
+    await vi.waitFor(() => expect(sessionWrites).toHaveLength(2));
+    expect(sessionWrites[1]).toEqual({
       'ishmael.playbackStatus': { phase: 'error', index: 0, total: 0, speed: 1, error: 'No API key saved.' },
     });
   });

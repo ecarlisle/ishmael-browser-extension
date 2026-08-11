@@ -34,7 +34,12 @@ class AudioStub {
   currentTime = 0;
   playbackRate = 1;
   handlers = new Map<string, EventHandler>();
-  play = vi.fn(() => Promise.resolve());
+  play = vi.fn(() => {
+    // Realistic media elements fire `playing` shortly after play() resolves.
+    const result = Promise.resolve();
+    void result.then(() => this.handlers.get('playing')?.());
+    return result;
+  });
   pause = vi.fn();
   load = vi.fn();
   removeAttribute = vi.fn();
@@ -170,7 +175,7 @@ describe('cancelling a pending pause', () => {
 
     expect(audio.src).toBe('blob:0'); // chunk 1 never attached
     expect(audio.play).toHaveBeenCalledTimes(1);
-    expect(pingPhase(listener)).toBe('idle');
+    expect(pingPhase(listener)).toBe('stopped');
   });
 
   it('NEXT cancels the pending delay and jumps immediately, skipping the pause', async () => {
