@@ -18,12 +18,13 @@ analytics, no hosted backend, no voice cloning, no cloud history.
 3. Enter and save a Fish Audio voice/reference ID.
 4. Click **Read page** or **Read selection**.
 5. Listen with a natural Fish Audio voice.
-6. Play, pause, resume, stop, and move to the previous or next text segment.
+6. Play, pause, resume, stop, and move to the previous or next section from
+   the popup's compact player controls.
 7. Adjust narration speed — applied instantly through the browser's playback
    rate to current and upcoming audio.
 8. Switch tabs or close the popup — playback continues in a background
    offscreen document.
-9. See the current segment number and a concise, live status/error message.
+9. See the current section number and a concise, live status/error message.
 10. Use the keyboard shortcuts **Alt+Shift+R** (read page) and **Alt+Shift+S**
     (read selection) — even with the popup closed; see
     [Keyboard shortcuts](#keyboard-shortcuts).
@@ -205,10 +206,21 @@ handshake.
 ## Popup layout
 
 The popup is one fixed-size window (340×600) with two internal views switched
-by a compact tab bar: **Listen** (Read page, Read selection, transport
-controls, segment status) and **Voice Settings** (API key, voice/reference ID,
-model, mood, speed, and save/reset controls). The popup never resizes when the
-user navigates between views.
+by a compact tab bar: **Listen** and **Voice Settings** (API key, voice/reference
+ID, model, mood, speed, and save/reset controls). The popup never resizes when
+the user navigates between views.
+
+**Listen** presents a compact media-player card instead of a loose row of
+buttons. The session status ("No active session", "Preparing page…", "Reading
+page", "Reading selection", "Paused") sits at the top with the current section
+count beneath it, followed by the two start actions — **Read page** (primary)
+and **Read selection** — and a transport row of icon buttons: Previous,
+Play/Pause, Next, and Stop. Once narration begins, the central Play/Pause
+control is the prominent action and its glyph and accessible label flip between
+pause and resume. Every icon button carries an `aria-label`, and a small
+CSS-rendered tooltip (from the same `data-tooltip` attribute) appears on hover
+and keyboard focus; the decorative inline SVG icons are `aria-hidden`. Controls
+are disabled until their action is actually available.
 
 Tabs follow the ARIA tabs pattern: `role="tablist"/"tab"/"tabpanel"`, roving
 tabindex, arrow-key (plus Home/End) navigation, `aria-selected` state, and
