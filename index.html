@@ -24,18 +24,52 @@
 
       <section id="panel-listen" class="panel" role="tabpanel" aria-labelledby="tab-listen" tabindex="0">
         <h2 class="visually-hidden">Listen</h2>
-        <div class="listen">
-          <div class="row">
-            <button id="read-page" type="button" class="primary">Read page</button>
-            <button id="read-selection" type="button" class="primary">Read selection</button>
+        <div class="player">
+          <div class="player__session" aria-live="polite">
+            <p id="player-status" class="player__status">No active session</p>
+            <p id="player-meta" class="player__meta"></p>
           </div>
-          <div class="row transport" role="group" aria-label="Playback controls">
-            <button id="play-pause" type="button">Pause</button>
-            <button id="prev" type="button" aria-label="Previous segment">Previous</button>
-            <button id="next" type="button" aria-label="Next segment">Next</button>
-            <button id="stop" type="button">Stop</button>
+
+          <div class="player__start" role="group" aria-label="Start narration">
+            <button id="read-page" type="button" class="primary" data-tooltip="Read this page">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+                <path d="M14 2v6h6" />
+                <path d="M10.2 13.4v6.4l5.6-3.2-5.6-3.2z" />
+              </svg>
+              <span>Read page</span>
+            </button>
+            <button id="read-selection" type="button" data-tooltip="Read selected text">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 5.5h13M4 10.5h13M4 15.5h8" />
+                <path d="M15.5 13.4v5.2l4.4-2.6-4.4-2.6z" />
+              </svg>
+              <span>Read selection</span>
+            </button>
           </div>
-          <p id="segment-info" class="segment-info" aria-live="polite">No active session</p>
+
+          <div class="player__transport" role="group" aria-label="Playback controls">
+            <button id="prev" type="button" class="icon-btn" aria-label="Previous section" data-tooltip="Previous section">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
+              </svg>
+            </button>
+            <button id="play-pause" type="button" class="icon-btn icon-btn--playpause" aria-label="Pause narration" data-tooltip="Pause narration">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 5h4v14H6zm8 0h4v14h-4z" />
+              </svg>
+            </button>
+            <button id="next" type="button" class="icon-btn" aria-label="Next section" data-tooltip="Next section">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 18l8.5-6L6 6v12zM16 6h2v12h-2z" />
+              </svg>
+            </button>
+            <button id="stop" type="button" class="icon-btn" aria-label="Stop narration" data-tooltip="Stop narration">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 6h12v12H6z" />
+              </svg>
+            </button>
+          </div>
         </div>
       </section>
 

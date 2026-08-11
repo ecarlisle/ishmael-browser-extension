@@ -13,6 +13,13 @@ function byId<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
+/** Inline SVG icons (currentColor, decorative). Kept here so the popup can
+ * swap the Play/Pause glyph as the playback phase changes. */
+const PLAY_ICON =
+  '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5v14l11-7z"/></svg>';
+const PAUSE_ICON =
+  '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>';
+
 const elements = {
   apiKey: byId<HTMLInputElement>('api-key'),
   saveKey: byId<HTMLButtonElement>('save-key'),
@@ -37,9 +44,14 @@ const elements = {
   prev: byId<HTMLButtonElement>('prev'),
   next: byId<HTMLButtonElement>('next'),
   stop: byId<HTMLButtonElement>('stop'),
-  segmentInfo: byId<HTMLParagraphElement>('segment-info'),
+  playerStatus: byId<HTMLParagraphElement>('player-status'),
+  playerMeta: byId<HTMLParagraphElement>('player-meta'),
   status: byId<HTMLParagraphElement>('status'),
 };
+
+/** The source of the most recent narration the popup started (unknown when
+ * the session began from a keyboard shortcut with the popup closed). */
+let lastSource: 'page' | 'selection' | null = null;
 
 /** The two popup views in tab order (roving tabindex, see selectTab). */
 const tabs: ReadonlyArray<HTMLButtonElement> = [elements.tabListen, elements.tabSettings];
@@ -133,41 +145,51 @@ function renderSettings(settings: RedactedSettings): void {
   }
 }
 
-function phaseLabel(phase: PlaybackStatus['phase']): string {
+/** Session headline shown in the player status area for each phase. */
+function sessionStatusText(phase: PlaybackStatus['phase'], source: 'page' | 'selection' | null): string {
   switch (phase) {
+    case 'idle':
+      return 'No active session';
     case 'loading':
-      return 'Loading';
+      return source === 'page' ? 'Preparing page…' : source === 'selection' ? 'Preparing selection…' : 'Preparing narration…';
     case 'playing':
-      return 'Playing';
+      return source === 'page' ? 'Reading page' : source === 'selection' ? 'Reading selection' : 'Reading';
     case 'paused':
       return 'Paused';
     case 'error':
-      return 'Error';
-    case 'idle':
-      return 'Idle';
+      return 'Narration error';
   }
 }
 
-function renderStatus(status: PlaybackStatus): void {
-  const active = status.phase !== 'idle' && status.total > 0;
+/** Makes the central Play/Pause control reflect the current phase: icon,
+ * accessible name, tooltip, and enabled state change together. */
+function renderPlayPause(status: PlaybackStatus): void {
+  const canToggle = status.phase === 'playing' || status.phase === 'paused';
+  const paused = status.phase === 'paused';
+  elements.playPause.disabled = !canToggle;
+  elements.playPause.innerHTML = paused ? PLAY_ICON : PAUSE_ICON;
+  elements.playPause.setAttribute('aria-label', paused ? 'Resume narration' : 'Pause narration');
+  elements.playPause.dataset.tooltip = paused ? 'Resume narration' : 'Pause narration';
+}
 
-  elements.playPause.disabled = !(status.phase === 'playing' || status.phase === 'paused');
-  elements.playPause.textContent = status.phase === 'paused' ? 'Resume' : 'Pause';
+function renderStatus(status: PlaybackStatus): void {
+  renderPlayPause(status);
+
+  const active = status.phase !== 'idle' && status.total > 0;
   elements.prev.disabled = !active;
   elements.next.disabled = !active;
   elements.stop.disabled = !active;
 
-  if (status.total > 0) {
+  elements.playerStatus.textContent = sessionStatusText(status.phase, lastSource);
+  if (status.total > 0 && status.phase !== 'idle') {
     const shownIndex = Math.min(status.index + 1, status.total);
-    elements.segmentInfo.textContent = `Segment ${shownIndex} of ${status.total} — ${phaseLabel(status.phase)}`;
+    elements.playerMeta.textContent = `Section ${shownIndex} of ${status.total}`;
   } else {
-    elements.segmentInfo.textContent = 'No active session';
+    elements.playerMeta.textContent = '';
   }
 
   if (status.phase === 'error' && status.error) {
     showError(status.error);
-  } else if (status.phase === 'loading') {
-    setStatus('Preparing narration…', 'info');
   } else if (statusKind === 'error') {
     // A non-error state arrived after an error: do not leave the error
     // visible once the action recovered or was superseded.
@@ -179,8 +201,9 @@ function renderStatus(status: PlaybackStatus): void {
 // Actions
 // ---------------------------------------------------------------------------
 
-async function readWithSource(source: 'page' | 'selection', label: string): Promise<void> {
-  setStatus(`${label} — extracting and preparing narration…`);
+async function readWithSource(source: 'page' | 'selection'): Promise<void> {
+  lastSource = source;
+  elements.playerStatus.textContent = source === 'page' ? 'Preparing page…' : 'Preparing selection…';
   try {
     const response = await send<{ ok: boolean; error?: string }>(
       source === 'page'
@@ -293,8 +316,8 @@ function wire(): void {
   elements.saveVoice.addEventListener('click', () => void saveVoice());
   elements.speed.addEventListener('change', () => void applySpeed());
 
-  elements.readPage.addEventListener('click', () => void readWithSource('page', 'Reading page'));
-  elements.readSelection.addEventListener('click', () => void readWithSource('selection', 'Reading selection'));
+  elements.readPage.addEventListener('click', () => void readWithSource('page'));
+  elements.readSelection.addEventListener('click', () => void readWithSource('selection'));
   elements.playPause.addEventListener('click', () => void control('PLAY_PAUSE'));
   elements.prev.addEventListener('click', () => void control('PREVIOUS'));
   elements.next.addEventListener('click', () => void control('NEXT'));
