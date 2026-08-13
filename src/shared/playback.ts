@@ -3,9 +3,45 @@
 
 import { clampSpeed, DEFAULT_SPEED, isRecord } from './settings';
 
-export type PlaybackPhase = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
+// Each phase is derived from a genuinely observable event, never from a
+// timer or an optimistic guess:
+//  - preparing:  the narration session is accepted and segments are being
+//                divided into request chunks (also used by the service
+//                worker while page extraction runs).
+//  - connecting: the Fish request has been initiated; no HTTP response yet.
+//  - generating: a 2xx response arrived but no audio bytes have been read.
+//  - buffering:  the first audio bytes arrived, a new file is attached and
+//                waiting to play, or the media element reports `waiting`.
+//  - playing:    the media element fired `playing` (never optimistic).
+//  - paused:     an explicit user pause (resume waits for `playing` again).
+//  - complete:   the final `ended` event fired.
+//  - stopped:    an explicit stop (or an internal reset) disposed the session.
+//  - error:      a synthesis or playback failure ended the session.
+//  - idle:       no session has ever been started in this context.
+export type PlaybackPhase =
+  | 'idle'
+  | 'preparing'
+  | 'connecting'
+  | 'generating'
+  | 'buffering'
+  | 'playing'
+  | 'paused'
+  | 'complete'
+  | 'stopped'
+  | 'error';
 
-export const PLAYBACK_PHASES: readonly PlaybackPhase[] = ['idle', 'loading', 'playing', 'paused', 'error'];
+export const PLAYBACK_PHASES: readonly PlaybackPhase[] = [
+  'idle',
+  'preparing',
+  'connecting',
+  'generating',
+  'buffering',
+  'playing',
+  'paused',
+  'complete',
+  'stopped',
+  'error',
+];
 
 export type PlaybackStatus = {
   phase: PlaybackPhase;

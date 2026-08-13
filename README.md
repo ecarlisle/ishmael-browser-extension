@@ -24,7 +24,9 @@ analytics, no hosted backend, no voice cloning, no cloud history.
    rate to current and upcoming audio.
 8. Switch tabs or close the popup — playback continues in a background
    offscreen document.
-9. See the current section number and a concise, live status/error message.
+9. See a concise segment indicator and a live status driven by real playback
+   events — never by timers or guesses. See
+   [Playback states](#playback-states).
 10. Use the keyboard shortcuts **Alt+Shift+R** (read page) and **Alt+Shift+S**
     (read selection) — even with the popup closed; see
     [Keyboard shortcuts](#keyboard-shortcuts).
@@ -82,6 +84,42 @@ new session abort it immediately, and a stale timer can never begin audio.
 **Read selection** applies the mood and inline emphasis only when the browser
 can retain it reliably (page extraction only), with no title, heading, or
 structural cues.
+
+## Playback states
+
+The popup's status line mirrors the narration pipeline, and every state is
+derived from a genuinely observable event — never from a timer, a delay, or an
+optimistic guess:
+
+| State | Shown when |
+| --- | --- |
+| `Preparing` | The narration session is accepted and segments are being divided into request chunks; the service worker also shows this while page extraction runs. |
+| `Connecting` | The Fish Audio request has been sent; no HTTP response has arrived yet. |
+| `Generating` | Fish answered with a 2xx status but the first audio bytes have not been read. |
+| `Buffering` | The first audio bytes arrived, or the media element reports it is waiting for playable data. |
+| `Playing` | The media element actually started playback (its `playing` event) — never merely because a request succeeded. |
+| `Paused` | The user paused; resuming reports `Playing` only after the media element starts again. |
+| `Complete` | The final narration audio played out (the `ended` event). |
+| `Stopped` | The user stopped the session, or the session was replaced by a new one. |
+| `Error` | Synthesis or playback failed; the specific, redacted message appears in the status bar below the player. |
+| (no session) | Nothing has been started (`No active session`). |
+
+The headline reads `Segment N of M — State` whenever the chunk count is known
+(`Segment 2 of 4 — Connecting`), and a bare state otherwise (`Preparing`,
+`Stopped`, `Complete`). The line beneath adds the session's source detail
+without repeating or contradicting the headline. States transition
+immediately when their event fires — there is no artificial debounce delay.
+
+Ishmael currently uses the ordinary REST `POST /v1/tts → MP3` flow for every
+chunk; there is no SSE or WebSocket transport. Consequently:
+
+- `Generating` means a 2xx response header arrived before any bytes — it never
+  appears just because a delay elapsed.
+- `Buffering` appears only when the pipeline genuinely awaits playable audio
+  (first stream bytes in hand, a new chunk attached but not yet started, or a
+  media `waiting` event).
+- There is no percentage progress, because the API provides no numeric
+  progress information.
 
 ## Current prototype limitations
 
@@ -211,16 +249,18 @@ ID, model, mood, speed, and save/reset controls). The popup never resizes when
 the user navigates between views.
 
 **Listen** presents a compact media-player card instead of a loose row of
-buttons. The session status ("No active session", "Preparing page…", "Reading
-page", "Reading selection", "Paused") sits at the top with the current section
-count beneath it, followed by the two start actions — **Read page** (primary)
-and **Read selection** — and a transport row of icon buttons: Previous,
-Play/Pause, Next, and Stop. Once narration begins, the central Play/Pause
-control is the prominent action and its glyph and accessible label flip between
-pause and resume. Every icon button carries an `aria-label`, and a small
-CSS-rendered tooltip (from the same `data-tooltip` attribute) appears on hover
-and keyboard focus; the decorative inline SVG icons are `aria-hidden`. Controls
-are disabled until their action is actually available.
+buttons. The headline line shows the segment indicator with its state — for
+example `No active session`, `Preparing`, `Stopped`, or `Segment 2 of 4 —
+Connecting` — and the line beneath adds the session's source detail
+(`Preparing page…`, `Reading page`, `Reading selection`). Below sit the two
+start actions — **Read page** (primary) and **Read selection** — and a
+transport row of icon buttons: Previous, Play/Pause, Next, and Stop. Once
+narration begins, the central Play/Pause control is the prominent action and
+its glyph and accessible label flip between pause and resume. Every icon
+button carries an `aria-label`, and a small CSS-rendered tooltip (from the
+same `data-tooltip` attribute) appears on hover and keyboard focus; the
+decorative inline SVG icons are `aria-hidden`. Controls are disabled until
+their action is actually available.
 
 Tabs follow the ARIA tabs pattern: `role="tablist"/"tab"/"tabpanel"`, roving
 tabindex, arrow-key (plus Home/End) navigation, `aria-selected` state, and
@@ -353,7 +393,8 @@ settings handling. Extension runtime behavior is best verified manually:
 2. Select some text on a page and click **Read selection**. Only the selection
    should be read.
 3. Click **Pause**, **Resume**, **Previous**, **Next**, and **Stop** and confirm
-   the segment counter and status text stay accurate.
+   the segment indicator (e.g. `Segment 2 of 4 — Playing`) and status text stay
+   accurate.
 4. Close the popup and switch tabs: narration should continue.
 5. Open `chrome://extensions` (an unsupported page) and click **Read page**:
    you should get a concise "cannot be read" error.

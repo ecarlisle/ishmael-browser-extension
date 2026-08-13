@@ -104,13 +104,54 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
+ * Reads a response body as a stream so the controller can observe when the
+ * API has actually started sending audio bytes (the generating → buffering
+ * transition) instead of guessing from timing. Falls back to `blob()` in
+ * environments without a readable body.
+ */
+async function readResponseBody(response: Response, onFirstBytes: () => void): Promise<Blob> {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const blob = await response.blob();
+    if (blob.size > 0) onFirstBytes();
+    return blob;
+  }
+  const parts: BlobPart[] = [];
+  let first = true;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (first) {
+        onFirstBytes();
+        first = false;
+      }
+      if (value) parts.push(value);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  return new Blob(parts, { type: response.headers.get('content-type') ?? 'audio/mpeg' });
+}
+
+/**
  * Fetches one narration chunk from Fish Audio. A single AbortController is
  * shared across retries so a session reset cancels the whole sequence. The
  * user's narration speed is never sent to Fish: `prosody.speed` stays 1 and
  * playback speed is applied via `audio.playbackRate` only.
+ *
+ * `onFetchPhase` reports the fetch pipeline's observable stages: the request
+ * is initiated (connecting), the API accepted it (generating), and the first
+ * audio bytes have arrived (buffering). Retries keep the phase at connecting.
  */
-async function fetchChunk(chunk: DecoratedChunk, controller: AbortController, attempt = 0): Promise<Blob> {
+async function fetchChunk(
+  chunk: DecoratedChunk,
+  controller: AbortController,
+  onFetchPhase?: (phase: 'connecting' | 'generating' | 'buffering') => void,
+  attempt = 0,
+): Promise<Blob> {
   try {
+    onFetchPhase?.('connecting');
     const response = await fetch(TTS_ENDPOINT, {
       method: 'POST',
       headers: buildTtsRequestHeaders(apiKey, model),
@@ -124,7 +165,8 @@ async function fetchChunk(chunk: DecoratedChunk, controller: AbortController, at
       throw new FishAudioError(response.status, parsed.message ?? undefined);
     }
 
-    const blob = await response.blob();
+    onFetchPhase?.('generating');
+    const blob = await readResponseBody(response, () => onFetchPhase?.('buffering'));
     if (blob.size === 0) {
       throw new Error('empty response');
     }
@@ -134,8 +176,12 @@ async function fetchChunk(chunk: DecoratedChunk, controller: AbortController, at
     // Explicit Fish Audio HTTP errors are not retried so rate limits and
     // balance errors surface immediately.
     if (!isAbortError(error) && !(error instanceof FishAudioError) && attempt < MAX_FETCH_RETRIES) {
+      // The attempt failed and the next one goes back to the network:
+      // report connecting before the retry delay so the state never lingers
+      // on generating from an attempt that produced nothing.
+      onFetchPhase?.('connecting');
       await abortableDelay(RETRY_DELAY_BASE_MS * (attempt + 1), controller.signal);
-      return fetchChunk(chunk, controller, attempt + 1);
+      return fetchChunk(chunk, controller, onFetchPhase, attempt + 1);
     }
     throw error;
   }
@@ -145,13 +191,19 @@ async function fetchChunk(chunk: DecoratedChunk, controller: AbortController, at
  * Returns the shared in-flight fetch for `chunkIndex` (starting one if
  * needed), or null when the index is out of range. Prefetch and foreground
  * loading both go through here so the same text is never requested twice.
+ * The optional callback reports the fetch's observable stages but is only
+ * attached when this call starts the fetch: a prefetch-started request stays
+ * silent so it never clobbers the phase of a different foreground chunk.
  */
-function pendingFetchFor(chunkIndex: number): { promise: Promise<Blob>; controller: AbortController } | null {
+function pendingFetchFor(
+  chunkIndex: number,
+  onFetchPhase?: (phase: 'connecting' | 'generating' | 'buffering') => void,
+): { promise: Promise<Blob>; controller: AbortController } | null {
   const chunk = queue[chunkIndex];
   if (!chunk) return null;
   const controller = new AbortController();
   return inflight.getOrStart(chunkIndex, () => ({
-    promise: fetchChunk(chunk, controller),
+    promise: fetchChunk(chunk, controller, onFetchPhase),
     controller,
   }));
 }
@@ -177,7 +229,7 @@ function fail(message: string): void {
 }
 
 function finish(): void {
-  phase = 'idle';
+  phase = 'complete';
   index = queue.length > 0 ? queue.length - 1 : 0;
   shouldBePlaying = false;
   audio.pause();
@@ -192,7 +244,7 @@ function resetSession(): void {
   pauseController = undefined;
   shouldBePlaying = false;
   pendingIndex = -1;
-  phase = 'idle';
+  phase = 'stopped';
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
@@ -211,7 +263,10 @@ function attachAndPlay(chunkIndex: number, url: string, playAfter = true): void 
   pruneUrlCache();
   if (playAfter) {
     shouldBePlaying = true;
-    phase = 'playing';
+    // Attached but not yet playing: the `playing` media event flips this to
+    // playing, and `waiting` may report buffering while the pipeline waits
+    // for playable audio.
+    phase = 'buffering';
     reportStatus();
     void audio
       .play()
@@ -251,11 +306,19 @@ async function loadChunk(chunkIndex: number, playAfter = true, opts: { skipInter
     return;
   }
 
-  phase = 'loading';
+  phase = 'connecting';
   errorMessage = undefined;
   reportStatus();
 
-  const pending = pendingFetchFor(chunkIndex);
+  const pending = pendingFetchFor(chunkIndex, (fetchPhase) => {
+    // Only this chunk's foreground fetch may change the phase: a superseded
+    // load (the user seeked away) or a stale session must not clobber the
+    // current state.
+    if (mySession === sessionId && pendingIndex === chunkIndex) {
+      phase = fetchPhase;
+      reportStatus();
+    }
+  });
   if (!pending) {
     finish();
     return;
@@ -357,7 +420,8 @@ async function requestApiKey(): Promise<{ ok: true; apiKey: string } | { ok: fal
 
 /**
  * Starts a new narration session. Returns the acknowledgement that the
- * service worker validates before caching any loading state.
+ * service worker validates before reporting success. The session reports
+ * its own phases from here on (preparing → connecting → … → playing).
  */
 async function startReading(
   segments: readonly NarrationSegment[],
@@ -368,6 +432,11 @@ async function startReading(
 ): Promise<StartReadingAck> {
   // Stop and dispose of any previous session first.
   resetSession();
+
+  // The session is accepted and being prepared (API key handshake, chunk
+  // division). This phase never claims playback is happening.
+  phase = 'preparing';
+  reportStatus();
 
   const keyResult = await requestApiKey();
   if (!keyResult.ok) {
@@ -384,6 +453,8 @@ async function startReading(
   // derived from page semantics. Source text is never altered.
   queue = decorateChunks(chunkSegments(segments), moodFromMessage);
   if (queue.length === 0) {
+    // Nothing could be narrated: no session is in progress.
+    phase = 'idle';
     reportStatus();
     return { ok: true };
   }
@@ -399,8 +470,8 @@ function togglePlayPause(): void {
     reportStatus();
   } else if (phase === 'paused') {
     shouldBePlaying = true;
-    phase = 'playing';
-    reportStatus();
+    // Resume does not claim "playing" optimistically: the media element's
+    // `playing` event (or a `waiting` → `playing` chain) reports the phase.
     void audio.play().catch((error: unknown) => {
       if (!isAbortError(error)) fail(messageForKind('playback'));
     });
@@ -438,6 +509,22 @@ function setSpeed(newSpeed: number): void {
   reportStatus();
 }
 
+audio.addEventListener('playing', () => {
+  // The only truthful source of "playing": the media element actually
+  // started playback. The shouldBePlaying guard absorbs a pause/play race
+  // where play() resolved after the user already paused.
+  if (queue.length === 0 || !shouldBePlaying || phase === 'playing') return;
+  phase = 'playing';
+  reportStatus();
+});
+
+audio.addEventListener('waiting', () => {
+  // The media pipeline is genuinely waiting for playable audio.
+  if (queue.length === 0 || !shouldBePlaying || phase === 'buffering') return;
+  phase = 'buffering';
+  reportStatus();
+});
+
 audio.addEventListener('ended', () => {
   if (queue.length === 0) return;
   if (index < queue.length - 1) {
@@ -448,7 +535,10 @@ audio.addEventListener('ended', () => {
 });
 
 audio.addEventListener('error', () => {
-  if (phase === 'playing' || phase === 'loading') {
+  // A decode/load failure can surface while a file is attached (playing,
+  // buffering, or seek-while-paused); an ended/complete session is excluded.
+  if (queue.length === 0 || phase === 'complete') return;
+  if (phase === 'playing' || phase === 'buffering' || phase === 'paused') {
     fail(messageForKind('playback'));
   }
 });

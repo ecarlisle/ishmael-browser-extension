@@ -7,8 +7,15 @@ describe('sanitizePlaybackStatus', () => {
     expect(status).toEqual({ phase: 'playing', index: 2, total: 10, speed: 1.2 });
   });
 
+  it('accepts every documented playback phase', () => {
+    for (const phase of ['idle', 'preparing', 'connecting', 'generating', 'buffering', 'playing', 'paused', 'complete', 'stopped', 'error']) {
+      expect(sanitizePlaybackStatus({ phase, index: 0, total: 1, speed: 1 })?.phase).toBe(phase);
+    }
+  });
+
   it('rejects missing or invalid phases', () => {
     expect(sanitizePlaybackStatus({ phase: 'warping', index: 0, total: 1 })).toBeNull();
+    expect(sanitizePlaybackStatus({ phase: 'loading', index: 0, total: 1 })).toBeNull();
     expect(sanitizePlaybackStatus(null)).toBeNull();
     expect(sanitizePlaybackStatus('playing')).toBeNull();
   });

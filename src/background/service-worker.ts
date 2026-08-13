@@ -21,6 +21,20 @@ import { sourceForCommand } from './commands';
 const OFFSCREEN_URL = 'offscreen.html';
 const STATUS_CACHE_KEY = 'ishmael.playbackStatus';
 
+/**
+ * Phases whose cached value is truthful without a PING: idle and the
+ * terminal outcomes (error, stopped, complete) are display facts, and
+ * preparing is extraction-in-progress known only to the service worker
+ * (the offscreen would report its previous session's stale phase).
+ */
+const CACHE_AUTHORITATIVE_PHASES: readonly PlaybackStatus['phase'][] = [
+  'idle',
+  'error',
+  'stopped',
+  'complete',
+  'preparing',
+];
+
 const OFFSCREEN_CREATE_FAILED_MESSAGE =
   'Could not create the background audio page. Check the service worker console, then reload the extension.';
 const OFFSCREEN_CONTEXT_MISSING_MESSAGE =
@@ -187,38 +201,54 @@ export async function beginReading(source: 'page' | 'selection'): Promise<Simple
     return { ok: false, error: messageForKind('unsupported-page') };
   }
 
+  // Extraction is committed once the content script is injected: cache
+  // 'preparing' so a reopened popup shows extraction in progress, then cache
+  // a specific error on any later failure so the next popup open explains it.
+  await cachePreparing();
+
   const response = await withTimeout(
     chrome.tabs.sendMessage(tab.id, { target: 'content', type: 'EXTRACT', source }),
     8000,
     null,
   );
   if (!isExtractionResult(response)) {
-    return { ok: false, error: 'The page did not respond to extraction. Reload the page and try again.' };
+    const error = 'The page did not respond to extraction. Reload the page and try again.';
+    await cacheError(error);
+    return { ok: false, error };
   }
   if (!response.ok) {
+    await cacheError(response.message);
     return { ok: false, error: response.message };
   }
 
   const settings = await loadSettings(localStorageArea);
-  if (!settings.apiKey) return { ok: false, error: messageForKind('missing-api-key') };
-  if (!settings.voiceId) return { ok: false, error: messageForKind('missing-voice') };
+  if (!settings.apiKey) {
+    const error = messageForKind('missing-api-key');
+    await cacheError(error);
+    return { ok: false, error };
+  }
+  if (!settings.voiceId) {
+    const error = messageForKind('missing-voice');
+    await cacheError(error);
+    return { ok: false, error };
+  }
 
   try {
     await ensureOffscreenDocument();
   } catch (error) {
     const problem = error instanceof OffscreenDocumentError ? error.problem : 'create-failed';
     logOffscreenProblem(problem);
-    return {
-      ok: false,
-      error: problem === 'no-context' ? OFFSCREEN_CONTEXT_MISSING_MESSAGE : OFFSCREEN_CREATE_FAILED_MESSAGE,
-    };
+    const message =
+      problem === 'no-context' ? OFFSCREEN_CONTEXT_MISSING_MESSAGE : OFFSCREEN_CREATE_FAILED_MESSAGE;
+    await cacheError(message);
+    return { ok: false, error: message };
   }
 
   // PING the controller until it answers PONG (bounded backoff): this
   // verifies the controller actually initialized and registered its listener
   // — a controller whose startup code threw can never be messaged — then send
-  // START_READING and require a validated acknowledgement. The loading state
-  // is only cached once the session is accepted.
+  // START_READING and require a validated acknowledgement. From here on the
+  // offscreen broadcasts drive the cached status (connecting → … → playing).
   const started = await startOffscreenSession(
     {
       target: 'offscreen',
@@ -233,9 +263,9 @@ export async function beginReading(source: 'page' | 'selection'): Promise<Simple
   );
   if (!started.ok) {
     logOffscreenProblem(started.problem);
+    await cacheError(started.error);
     return { ok: false, error: started.error };
   }
-  await cacheStatus({ phase: 'loading', index: 0, total: response.segments.length, speed: settings.speed });
   return { ok: true };
 }
 
@@ -304,16 +334,14 @@ function logOffscreenProblem(problem: string): void {
 
 /**
  * Routes a manifest command to the same beginReading() flow used by the
- * popup buttons. When a shortcut fails while the popup is closed, stores an
- * error playback status so the next popup open explains what happened.
+ * popup buttons. beginReading() itself caches the error status when a
+ * shortcut fails, so the next popup open explains what happened even though
+ * the popup was closed.
  */
 async function handleShortcut(command: string): Promise<void> {
   const source = sourceForCommand(command);
   if (!source) return; // unknown commands are ignored
-  const result = await beginReading(source);
-  if (result.ok) return;
-  const cached = await readCachedStatus();
-  await cacheStatus({ phase: 'error', index: 0, total: 0, speed: cached.speed, error: result.error });
+  await beginReading(source);
 }
 
 // ---------------------------------------------------------------------------
@@ -338,16 +366,30 @@ async function readCachedStatus(): Promise<PlaybackStatus> {
 }
 
 /**
- * Returns the current playback status. When the cache says something is
- * playing, verifies the offscreen document is still alive with a PING; if it
- * is gone, reports idle (its audio is gone too).
+ * Caches the extraction/preparing state after the content script is injected
+ * so a reopened popup can show that a read is in progress.
+ */
+async function cachePreparing(): Promise<void> {
+  const cached = await readCachedStatus();
+  await cacheStatus({ phase: 'preparing', index: 0, total: 0, speed: cached.speed });
+}
+
+/** Caches a terminal error status (user-facing, already redacted). */
+async function cacheError(error: string): Promise<void> {
+  const cached = await readCachedStatus();
+  await cacheStatus({ phase: 'error', index: 0, total: 0, speed: cached.speed, error });
+}
+
+/**
+ * Returns the current playback status. Phases that are truthful as cached
+ * (no session, terminal outcomes, and extraction-in-progress known only to
+ * the service worker) are returned as-is. Live phases (connecting through
+ * paused) are verified against the offscreen document with a PING so a dead
+ * offscreen context collapses to idle instead of claiming playback.
  */
 async function getFreshStatus(): Promise<PlaybackStatus> {
   const cached = await readCachedStatus();
-  // Idle and error statuses are terminal display information: return them
-  // as-is instead of letting a PING failure overwrite a stored error (e.g. a
-  // shortcut failure that happened while the popup was closed).
-  if (cached.phase === 'idle' || cached.phase === 'error') return cached;
+  if (CACHE_AUTHORITATIVE_PHASES.includes(cached.phase)) return cached;
   const outcome = await withTimeout(forwardToOffscreen({ target: 'offscreen', type: 'PING' }), 600, null);
   if (outcome && outcome.ok && isPongResponse(outcome.value)) {
     const status = sanitizePlaybackStatus(outcome.value.status);

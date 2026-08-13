@@ -117,7 +117,7 @@ describe('player rendering by playback state', () => {
     expect(byId<HTMLButtonElement>('read-selection').disabled).toBe(false);
   });
 
-  it('renders a playing session with enabled transport and section meta', () => {
+  it('renders a playing session with enabled transport and a segment indicator', () => {
     emitStatus({ phase: 'playing', index: 1, total: 5, speed: 1 });
 
     expect(byId('player-status').textContent).toBe('Reading');
@@ -128,17 +128,33 @@ describe('player rendering by playback state', () => {
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(false);
   });
 
-  it('renders a loading session as preparing and disables play/pause', () => {
-    emitStatus({ phase: 'loading', index: 0, total: 0, speed: 1 });
+  it('renders the observable fetch-pipeline phases with the right labels and enablement', () => {
+    // Preparing: session accepted, no chunk count yet — not navigable.
+    emitStatus({ phase: 'preparing', index: 0, total: 0, speed: 1 });
     expect(byId('player-status').textContent).toBe('Preparing narration…');
     expect(byId('player-meta').textContent).toBe('');
     expect(playPause().disabled).toBe(true);
     expect(byId<HTMLButtonElement>('prev').disabled).toBe(true);
+    expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
 
-    // A known queue during loading makes the transport navigable.
-    emitStatus({ phase: 'loading', index: 0, total: 4, speed: 1 });
+    // Connecting: the Fish request is in flight; chunk count is now known.
+    // The headline stays a stable "Reading" while the chip tracks the
+    // precise phase.
+    emitStatus({ phase: 'connecting', index: 0, total: 4, speed: 1 });
+    expect(byId('player-status').textContent).toBe('Reading');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 4 — Connecting');
     expect(byId<HTMLButtonElement>('next').disabled).toBe(false);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(false);
+
+    // Generating: 2xx received, no audio bytes yet.
+    emitStatus({ phase: 'generating', index: 0, total: 4, speed: 1 });
+    expect(byId('player-status').textContent).toBe('Reading');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 4 — Generating');
+
+    // Buffering: audio bytes arrived / the media pipeline waits for audio.
+    emitStatus({ phase: 'buffering', index: 0, total: 4, speed: 1 });
+    expect(byId('player-status').textContent).toBe('Reading');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 4 — Buffering');
   });
 
   it('renders a paused session and swaps the Play/Pause icon and label', () => {
@@ -156,6 +172,19 @@ describe('player rendering by playback state', () => {
     expect(iconPath(playPause())).toBe(PAUSE_PATH);
     expect(playPause().getAttribute('aria-label')).toBe('Pause narration');
     expect(playPause().dataset.tooltip).toBe('Pause narration');
+  });
+
+  it('renders stopped and complete as bare terminal states that are not navigable', () => {
+    emitStatus({ phase: 'stopped', index: 0, total: 0, speed: 1 });
+    expect(byId('player-status').textContent).toBe('Stopped');
+    expect(byId('player-meta').textContent).toBe('');
+    expect(playPause().disabled).toBe(true);
+    expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
+
+    emitStatus({ phase: 'complete', index: 2, total: 3, speed: 1 });
+    expect(byId('player-status').textContent).toBe('Finished');
+    expect(byId('player-meta').textContent).toBe('Segment 3 of 3 — Complete');
+    expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
   });
 
   it('renders an error session, reports the message, and recovers', () => {
@@ -177,6 +206,38 @@ describe('player rendering by playback state', () => {
     expect(status.hidden).toBe(true);
     expect(status.textContent).toBe('');
   });
+
+  it('maps every playback phase to a truthful headline with no count known', () => {
+    const bare: Array<[PlaybackStatus['phase'], string]> = [
+      ['idle', 'No active session'],
+      ['stopped', 'Stopped'],
+      ['preparing', 'Preparing narration…'],
+      ['complete', 'Finished'],
+    ];
+    for (const [phase, label] of bare) {
+      emitStatus({ phase, index: 0, total: 0, speed: 1 });
+      expect(byId('player-status').textContent).toBe(label);
+      expect(byId('player-meta').textContent).toBe('');
+    }
+  });
+
+  it('maps every playback phase to a headline and a segment chip once a count is known', () => {
+    const withCount: Array<[PlaybackStatus['phase'], string, string]> = [
+      ['preparing', 'Preparing narration…', 'Segment 1 of 2 — Preparing'],
+      ['connecting', 'Reading', 'Segment 1 of 2 — Connecting'],
+      ['generating', 'Reading', 'Segment 1 of 2 — Generating'],
+      ['buffering', 'Reading', 'Segment 1 of 2 — Buffering'],
+      ['playing', 'Reading', 'Segment 1 of 2 — Playing'],
+      ['paused', 'Paused', 'Segment 1 of 2 — Paused'],
+      ['complete', 'Finished', 'Segment 1 of 2 — Complete'],
+      ['error', 'Narration error', 'Segment 1 of 2 — Error'],
+    ];
+    for (const [phase, headline, chip] of withCount) {
+      emitStatus({ phase, index: 0, total: 2, speed: 1 });
+      expect(byId('player-status').textContent).toBe(headline);
+      expect(byId('player-meta').textContent).toBe(chip);
+    }
+  });
 });
 
 describe('starting narration', () => {
@@ -184,10 +245,12 @@ describe('starting narration', () => {
     byId<HTMLButtonElement>('read-page').click();
     expect(sentMessages).toContainEqual({ target: 'service-worker', type: 'READ_PAGE' });
     expect(byId('player-status').textContent).toBe('Preparing page…');
+    expect(byId('player-meta').textContent).toBe('');
 
     await new Promise((resolve) => setTimeout(resolve, 0));
-    emitStatus({ phase: 'loading', index: 0, total: 0, speed: 1 });
+    emitStatus({ phase: 'preparing', index: 0, total: 0, speed: 1 });
     expect(byId('player-status').textContent).toBe('Preparing page…');
+    expect(byId('player-meta').textContent).toBe('');
 
     emitStatus({ phase: 'playing', index: 0, total: 3, speed: 1 });
     expect(byId('player-status').textContent).toBe('Reading page');
@@ -198,10 +261,12 @@ describe('starting narration', () => {
     byId<HTMLButtonElement>('read-selection').click();
     expect(sentMessages).toContainEqual({ target: 'service-worker', type: 'READ_SELECTION' });
     expect(byId('player-status').textContent).toBe('Preparing selection…');
+    expect(byId('player-meta').textContent).toBe('');
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     emitStatus({ phase: 'playing', index: 1, total: 4, speed: 1 });
     expect(byId('player-status').textContent).toBe('Reading selection');
+    expect(byId('player-meta').textContent).toBe('Segment 2 of 4 — Playing');
   });
 
   it('shows a success confirmation after narration starts', async () => {

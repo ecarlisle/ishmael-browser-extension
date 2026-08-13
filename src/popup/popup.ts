@@ -3,7 +3,7 @@
 
 import './popup.css';
 import { isExtensionMessage, type ExtensionMessage } from '../shared/messages';
-import type { Mood, RedactedSettings } from '../shared/settings';
+import { DEFAULT_SPEED, type Mood, type RedactedSettings } from '../shared/settings';
 import { createIdleStatus, type PlaybackStatus } from '../shared/playback';
 import { applyStatusTone, type StatusKind } from './status-tone';
 
@@ -184,17 +184,58 @@ function renderSettings(settings: RedactedSettings): void {
   showView(settings.hasApiKey ? 'app' : 'onboarding');
 }
 
-/** Session headline shown in the player status area for each phase. */
-function sessionStatusText(phase: PlaybackStatus['phase'], source: 'page' | 'selection' | null): string {
+/** Short user-facing name for each playback phase. */
+function playbackPhaseLabel(phase: PlaybackStatus['phase']): string {
   switch (phase) {
-    case 'idle':
-      return 'No active session';
-    case 'loading':
-      return source === 'page' ? 'Preparing page…' : source === 'selection' ? 'Preparing selection…' : 'Preparing narration…';
+    case 'preparing':
+      return 'Preparing';
+    case 'connecting':
+      return 'Connecting';
+    case 'generating':
+      return 'Generating';
+    case 'buffering':
+      return 'Buffering';
     case 'playing':
-      return source === 'page' ? 'Reading page' : source === 'selection' ? 'Reading selection' : 'Reading';
+      return 'Playing';
     case 'paused':
       return 'Paused';
+    case 'complete':
+      return 'Complete';
+    case 'stopped':
+      return 'Stopped';
+    case 'error':
+      return 'Error';
+    case 'idle':
+      return 'Idle';
+  }
+}
+
+/**
+ * The headline shown above the transport controls: a short, always-present
+ * phrase covering every phase. The segment count and precise phase word live
+ * in the chip below (see renderStatus) so this stays readable at a glance.
+ */
+function statusHeadline(status: PlaybackStatus): string {
+  switch (status.phase) {
+    case 'idle':
+      return 'No active session';
+    case 'preparing':
+      return lastSource === 'page'
+        ? 'Preparing page…'
+        : lastSource === 'selection'
+          ? 'Preparing selection…'
+          : 'Preparing narration…';
+    case 'connecting':
+    case 'generating':
+    case 'buffering':
+    case 'playing':
+      return lastSource === 'page' ? 'Reading page' : lastSource === 'selection' ? 'Reading selection' : 'Reading';
+    case 'paused':
+      return 'Paused';
+    case 'complete':
+      return 'Finished';
+    case 'stopped':
+      return 'Stopped';
     case 'error':
       return 'Narration error';
   }
@@ -211,37 +252,49 @@ function renderPlayPause(status: PlaybackStatus): void {
   elements.playPause.dataset.tooltip = paused ? 'Resume narration' : 'Pause narration';
 }
 
+/**
+ * Phases where the transport controls are meaningful: the session is live or
+ * recoverable and the chunk count is known. Preparing/stopped/complete/idle
+ * are not navigable.
+ */
+const NAVIGABLE_PHASES: readonly PlaybackStatus['phase'][] = [
+  'connecting',
+  'generating',
+  'buffering',
+  'playing',
+  'paused',
+  'error',
+];
+
 function renderStatus(status: PlaybackStatus): void {
   renderPlayPause(status);
 
-  const active = status.phase !== 'idle' && status.total > 0;
-  elements.prev.disabled = !active;
-  elements.next.disabled = !active;
-  elements.stop.disabled = !active;
+  const navigable = NAVIGABLE_PHASES.includes(status.phase) && status.total > 0;
+  elements.prev.disabled = !navigable;
+  elements.next.disabled = !navigable;
+  elements.stop.disabled = !navigable;
 
-  elements.playerStatus.textContent = sessionStatusText(status.phase, lastSource);
+  elements.playerStatus.textContent = statusHeadline(status);
 
-  if (active) {
+  // The chip shows the segment count and precise phase word whenever a count
+  // is known, independent of whether the transport is currently navigable
+  // (e.g. "Segment 3 of 3 — Complete" once a reading finishes).
+  if (status.total > 0) {
     const shownIndex = Math.min(status.index + 1, status.total);
-    const phaseLabel =
-      status.phase === 'paused'
-        ? 'Paused'
-        : status.phase === 'loading'
-          ? 'Preparing'
-          : status.phase === 'error'
-            ? 'Error'
-            : 'Playing';
     elements.segmentTracker.hidden = false;
-    elements.playerMeta.textContent = `Segment ${shownIndex} of ${status.total} — ${phaseLabel}`;
+    elements.playerMeta.textContent = `Segment ${shownIndex} of ${status.total} — ${playbackPhaseLabel(status.phase)}`;
+  } else {
+    elements.segmentTracker.hidden = true;
+    elements.playerMeta.textContent = '';
+  }
 
+  if (navigable) {
     const completed = status.phase === 'playing' ? status.index + 0.5 : status.index;
     const percent = Math.min(100, Math.max(0, (completed / status.total) * 100));
     elements.progressTrack.hidden = false;
     elements.progressTrack.setAttribute('aria-valuenow', String(Math.round(percent)));
     elements.progressFill.style.width = `${percent}%`;
   } else {
-    elements.segmentTracker.hidden = true;
-    elements.playerMeta.textContent = '';
     elements.progressTrack.hidden = true;
     elements.progressFill.style.width = '0%';
   }
@@ -261,7 +314,10 @@ function renderStatus(status: PlaybackStatus): void {
 
 async function readWithSource(source: 'page' | 'selection'): Promise<void> {
   lastSource = source;
-  elements.playerStatus.textContent = source === 'page' ? 'Preparing page…' : 'Preparing selection…';
+  // Optimistic local state while the service worker extracts: the offscreen
+  // broadcasts the authoritative preparing → … → playing chain once it has
+  // the session.
+  renderStatus({ phase: 'preparing', index: 0, total: 0, speed: DEFAULT_SPEED });
   try {
     const response = await send<{ ok: boolean; error?: string }>(
       source === 'page'
