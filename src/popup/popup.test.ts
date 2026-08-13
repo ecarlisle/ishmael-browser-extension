@@ -121,7 +121,7 @@ describe('player rendering by playback state', () => {
     emitStatus({ phase: 'playing', index: 1, total: 5, speed: 1 });
 
     expect(byId('player-status').textContent).toBe('Reading');
-    expect(byId('player-meta').textContent).toBe('Section 2 of 5');
+    expect(byId('player-meta').textContent).toBe('Segment 2 of 5 — Playing');
     expect(playPause().disabled).toBe(false);
     expect(byId<HTMLButtonElement>('prev').disabled).toBe(false);
     expect(byId<HTMLButtonElement>('next').disabled).toBe(false);
@@ -145,7 +145,7 @@ describe('player rendering by playback state', () => {
     emitStatus({ phase: 'paused', index: 2, total: 5, speed: 1 });
 
     expect(byId('player-status').textContent).toBe('Paused');
-    expect(byId('player-meta').textContent).toBe('Section 3 of 5');
+    expect(byId('player-meta').textContent).toBe('Segment 3 of 5 — Paused');
     expect(playPause().disabled).toBe(false);
     expect(iconPath(playPause())).toBe(PLAY_PATH);
     expect(playPause().getAttribute('aria-label')).toBe('Resume narration');
@@ -162,7 +162,7 @@ describe('player rendering by playback state', () => {
     emitStatus({ phase: 'error', index: 0, total: 3, speed: 1, error: 'No API key saved.' });
 
     expect(byId('player-status').textContent).toBe('Narration error');
-    expect(byId('player-meta').textContent).toBe('Section 1 of 3');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 3 — Error');
     expect(playPause().disabled).toBe(true);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(false);
 
@@ -191,7 +191,7 @@ describe('starting narration', () => {
 
     emitStatus({ phase: 'playing', index: 0, total: 3, speed: 1 });
     expect(byId('player-status').textContent).toBe('Reading page');
-    expect(byId('player-meta').textContent).toBe('Section 1 of 3');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 3 — Playing');
   });
 
   it('Read selection sends READ_SELECTION and tracks its own source', async () => {
@@ -271,12 +271,12 @@ describe('accessible names, tooltips, and structure', () => {
     const buttons = [...panel.querySelectorAll('button')];
     expect(buttons.every((button) => button instanceof HTMLButtonElement)).toBe(true);
     expect(buttons.map((button) => button.id)).toEqual([
-      'read-page',
-      'read-selection',
       'prev',
       'play-pause',
       'next',
       'stop',
+      'read-page',
+      'read-selection',
     ]);
   });
 

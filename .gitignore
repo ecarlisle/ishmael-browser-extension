@@ -10,3 +10,8 @@ dist/
 
 # Environment files
 .env.*
+
+.serena/
+
+# Local Claude Code permission settings (machine-specific)
+.claude/settings.local.json

@@ -19,8 +19,27 @@ const PLAY_ICON =
   '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5v14l11-7z"/></svg>';
 const PAUSE_ICON =
   '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>';
+const EYE_ICON =
+  '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_ICON =
+  '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.4 0 10 7 10 7a17.7 17.7 0 0 1-3.2 4.1M6.6 6.6C4 8.3 2 12 2 12s3.6 7 10 7a10.4 10.4 0 0 0 4.2-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+
+type View = 'onboarding' | 'app' | 'help';
 
 const elements = {
+  viewOnboarding: byId<HTMLElement>('view-onboarding'),
+  viewApp: byId<HTMLElement>('view-app'),
+  viewHelp: byId<HTMLElement>('view-help'),
+
+  onboardingForm: byId<HTMLFormElement>('onboarding-form'),
+  onboardingApiKey: byId<HTMLInputElement>('onboarding-api-key'),
+  onboardingToggleVisibility: byId<HTMLButtonElement>('onboarding-toggle-visibility'),
+  onboardingHelpToggle: byId<HTMLButtonElement>('onboarding-help-toggle'),
+  onboardingHelpContent: byId<HTMLDivElement>('onboarding-help-content'),
+
+  openHelp: byId<HTMLButtonElement>('open-help'),
+  closeHelp: byId<HTMLButtonElement>('close-help'),
+
   apiKey: byId<HTMLInputElement>('api-key'),
   saveKey: byId<HTMLButtonElement>('save-key'),
   keyState: byId<HTMLSpanElement>('key-state'),
@@ -45,7 +64,10 @@ const elements = {
   next: byId<HTMLButtonElement>('next'),
   stop: byId<HTMLButtonElement>('stop'),
   playerStatus: byId<HTMLParagraphElement>('player-status'),
-  playerMeta: byId<HTMLParagraphElement>('player-meta'),
+  segmentTracker: byId<HTMLDivElement>('segment-tracker'),
+  playerMeta: byId<HTMLSpanElement>('player-meta'),
+  progressTrack: byId<HTMLDivElement>('progress-track'),
+  progressFill: byId<HTMLDivElement>('progress-fill'),
   status: byId<HTMLParagraphElement>('status'),
 };
 
@@ -53,15 +75,28 @@ const elements = {
  * the session began from a keyboard shortcut with the popup closed). */
 let lastSource: 'page' | 'selection' | null = null;
 
-/** The two popup views in tab order (roving tabindex, see selectTab). */
+/** The two in-app views in tab order (roving tabindex, see selectTab). */
 const tabs: ReadonlyArray<HTMLButtonElement> = [elements.tabListen, elements.tabSettings];
 
-/** True once the API key and reference ID are both saved (drives the default view). */
+/** True once the API key and reference ID are both saved (drives the default tab). */
 let setupComplete = false;
 
+/** Which app tab was active before Help & Privacy was opened, so closing it returns there. */
+let tabBeforeHelp: HTMLButtonElement = elements.tabListen;
+
 /**
- * Switches the popup to the given view. Inactive tabs stay in the tab order
- * only via arrow keys (WAI-ARIA tabs pattern); panels are hidden/shown.
+ * Switches the popup between onboarding, the main app, and Help & Privacy.
+ * Only one top-level view is visible at a time.
+ */
+function showView(view: View): void {
+  elements.viewOnboarding.hidden = view !== 'onboarding';
+  elements.viewApp.hidden = view !== 'app';
+  elements.viewHelp.hidden = view !== 'help';
+}
+
+/**
+ * Switches the popup to the given in-app tab. Inactive tabs stay in the tab
+ * order only via arrow keys (WAI-ARIA tabs pattern); panels are hidden/shown.
  */
 function selectTab(tab: HTMLButtonElement): void {
   for (const candidate of tabs) {
@@ -127,9 +162,9 @@ function renderSettings(settings: RedactedSettings): void {
   elements.speedValue.value = `${settings.speed}×`;
 
   // The tab note mirrors setup state: the popup defaults to Voice Settings
-  // when the key or reference ID is still missing (see init).
+  // when the reference ID is still missing (see init).
   setupComplete = settings.hasApiKey && settings.voiceId.trim().length > 0;
-  elements.settingsSummaryNote.textContent = setupComplete ? 'Configured' : 'Setup required';
+  elements.settingsSummaryNote.textContent = setupComplete ? '' : 'Setup required';
 
   if (settings.hasApiKey) {
     elements.apiKey.placeholder = 'Key is saved — enter a new one to replace it';
@@ -143,6 +178,10 @@ function renderSettings(settings: RedactedSettings): void {
     elements.keyState.textContent = 'No API key saved yet.';
     elements.keyActions.hidden = true;
   }
+
+  // Onboarding gates the whole app: without a key, nothing else is reachable.
+  if (!elements.viewHelp.hidden) return; // do not steal focus from an open Help screen
+  showView(settings.hasApiKey ? 'app' : 'onboarding');
 }
 
 /** Session headline shown in the player status area for each phase. */
@@ -181,11 +220,30 @@ function renderStatus(status: PlaybackStatus): void {
   elements.stop.disabled = !active;
 
   elements.playerStatus.textContent = sessionStatusText(status.phase, lastSource);
-  if (status.total > 0 && status.phase !== 'idle') {
+
+  if (active) {
     const shownIndex = Math.min(status.index + 1, status.total);
-    elements.playerMeta.textContent = `Section ${shownIndex} of ${status.total}`;
+    const phaseLabel =
+      status.phase === 'paused'
+        ? 'Paused'
+        : status.phase === 'loading'
+          ? 'Preparing'
+          : status.phase === 'error'
+            ? 'Error'
+            : 'Playing';
+    elements.segmentTracker.hidden = false;
+    elements.playerMeta.textContent = `Segment ${shownIndex} of ${status.total} — ${phaseLabel}`;
+
+    const completed = status.phase === 'playing' ? status.index + 0.5 : status.index;
+    const percent = Math.min(100, Math.max(0, (completed / status.total) * 100));
+    elements.progressTrack.hidden = false;
+    elements.progressTrack.setAttribute('aria-valuenow', String(Math.round(percent)));
+    elements.progressFill.style.width = `${percent}%`;
   } else {
+    elements.segmentTracker.hidden = true;
     elements.playerMeta.textContent = '';
+    elements.progressTrack.hidden = true;
+    elements.progressFill.style.width = '0%';
   }
 
   if (status.phase === 'error' && status.error) {
@@ -220,12 +278,12 @@ async function readWithSource(source: 'page' | 'selection'): Promise<void> {
   }
 }
 
-async function saveKey(): Promise<void> {
-  const apiKey = elements.apiKey.value.trim();
+async function saveKeyFrom(input: HTMLInputElement): Promise<void> {
+  const apiKey = input.value.trim();
   if (!apiKey) return;
   try {
     await send({ target: 'service-worker', type: 'SAVE_SETTINGS', patch: { apiKey } });
-    elements.apiKey.value = '';
+    input.value = '';
     setStatus('API key saved.', 'success');
     await refreshSettings();
   } catch {
@@ -304,10 +362,34 @@ function wire(): void {
     tab.addEventListener('click', () => selectTab(tab));
     tab.addEventListener('keydown', onTabKeyDown);
   }
+
+  elements.openHelp.addEventListener('click', () => {
+    tabBeforeHelp = elements.tabSettings.getAttribute('aria-selected') === 'true' ? elements.tabSettings : elements.tabListen;
+    showView('help');
+  });
+  elements.closeHelp.addEventListener('click', () => {
+    selectTab(tabBeforeHelp);
+    showView('app');
+  });
+
+  elements.onboardingForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void saveKeyFrom(elements.onboardingApiKey);
+  });
+  elements.onboardingToggleVisibility.addEventListener('click', () => {
+    const showing = elements.onboardingApiKey.type === 'text';
+    elements.onboardingApiKey.type = showing ? 'password' : 'text';
+    elements.onboardingToggleVisibility.innerHTML = showing ? EYE_ICON : EYE_OFF_ICON;
+    elements.onboardingToggleVisibility.setAttribute('aria-label', showing ? 'Show API key' : 'Hide API key');
+  });
+  elements.onboardingHelpToggle.addEventListener('click', () => {
+    elements.onboardingHelpContent.hidden = !elements.onboardingHelpContent.hidden;
+  });
+
   elements.apiKey.addEventListener('input', () => {
     elements.saveKey.disabled = elements.apiKey.value.trim().length === 0;
   });
-  elements.saveKey.addEventListener('click', () => void saveKey());
+  elements.saveKey.addEventListener('click', () => void saveKeyFrom(elements.apiKey));
   elements.replaceKey.addEventListener('click', () => {
     elements.apiKey.focus();
     elements.apiKey.placeholder = 'Paste a new API key';
