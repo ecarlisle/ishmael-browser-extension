@@ -104,11 +104,13 @@ function iconPath(button: HTMLButtonElement): string | null {
 }
 
 describe('player rendering by playback state', () => {
-  it('renders an idle, fully disabled player', () => {
+  it('renders an idle player with an empty-state hint and no playback controls', () => {
     const status = byId('player-status');
-    expect(status.textContent).toBe('No active session');
-    expect(byId('player-meta').textContent).toBe('');
+    expect(status.textContent).toBe('Ready to read');
+    expect(byId('player-meta').textContent).toBe('Choose page or selection to begin.');
 
+    // The transport row is hidden while idle: its actions would do nothing.
+    expect(byId('player-transport').hidden).toBe(true);
     expect(playPause().disabled).toBe(true);
     expect(byId<HTMLButtonElement>('prev').disabled).toBe(true);
     expect(byId<HTMLButtonElement>('next').disabled).toBe(true);
@@ -122,6 +124,7 @@ describe('player rendering by playback state', () => {
 
     expect(byId('player-status').textContent).toBe('Segment 2 of 5 — Playing');
     expect(byId('player-meta').textContent).toBe('');
+    expect(byId('player-transport').hidden).toBe(false);
     expect(playPause().disabled).toBe(false);
     expect(byId<HTMLButtonElement>('prev').disabled).toBe(false);
     expect(byId<HTMLButtonElement>('next').disabled).toBe(false);
@@ -129,11 +132,14 @@ describe('player rendering by playback state', () => {
   });
 
   it('renders the observable fetch-pipeline phases with the right labels and enablement', () => {
-    // Preparing: session accepted, no chunk count yet — not navigable.
+    // Preparing: session accepted, no chunk count yet — transport visible
+    // but nothing is navigable.
     emitStatus({ phase: 'preparing', index: 0, total: 0, speed: 1 });
     expect(byId('player-status').textContent).toBe('Preparing');
     expect(byId('player-meta').textContent).toBe('Preparing narration…');
+    expect(byId('player-transport').hidden).toBe(false);
     expect(playPause().disabled).toBe(true);
+    expect(iconPath(playPause())).toBe(PLAY_PATH);
     expect(byId<HTMLButtonElement>('prev').disabled).toBe(true);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
 
@@ -169,16 +175,18 @@ describe('player rendering by playback state', () => {
     expect(playPause().dataset.tooltip).toBe('Pause narration');
   });
 
-  it('renders stopped and complete as bare terminal states that are not navigable', () => {
+  it('renders stopped and finished as terminal states without playback controls', () => {
     emitStatus({ phase: 'stopped', index: 0, total: 0, speed: 1 });
     expect(byId('player-status').textContent).toBe('Stopped');
-    expect(byId('player-meta').textContent).toBe('');
+    expect(byId('player-meta').textContent).toBe('Choose page or selection to begin.');
+    expect(byId('player-transport').hidden).toBe(true);
     expect(playPause().disabled).toBe(true);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
 
     emitStatus({ phase: 'complete', index: 2, total: 3, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Segment 3 of 3 — Complete');
-    expect(byId('player-meta').textContent).toBe('');
+    expect(byId('player-status').textContent).toBe('Segment 3 of 3 — Finished');
+    expect(byId('player-meta').textContent).toBe('Read page or Read selection to play again.');
+    expect(byId('player-transport').hidden).toBe(true);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
   });
 
@@ -187,6 +195,7 @@ describe('player rendering by playback state', () => {
 
     expect(byId('player-status').textContent).toBe('Segment 1 of 3 — Error');
     expect(byId('player-meta').textContent).toBe('');
+    expect(byId('player-transport').hidden).toBe(false);
     expect(playPause().disabled).toBe(true);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(false);
 
@@ -204,10 +213,10 @@ describe('player rendering by playback state', () => {
 
   it('maps every playback phase to a truthful indicator line', () => {
     const bare: Array<[PlaybackStatus['phase'], string]> = [
-      ['idle', 'No active session'],
+      ['idle', 'Ready to read'],
       ['stopped', 'Stopped'],
       ['preparing', 'Preparing'],
-      ['complete', 'Complete'],
+      ['complete', 'Finished'],
     ];
     for (const [phase, label] of bare) {
       emitStatus({ phase, index: 0, total: 0, speed: 1 });
@@ -220,12 +229,25 @@ describe('player rendering by playback state', () => {
       ['buffering', 'Segment 1 of 2 — Buffering'],
       ['playing', 'Segment 1 of 2 — Playing'],
       ['paused', 'Segment 1 of 2 — Paused'],
-      ['complete', 'Segment 1 of 2 — Complete'],
+      ['complete', 'Segment 1 of 2 — Finished'],
       ['error', 'Segment 1 of 2 — Error'],
     ];
     for (const [phase, label] of withCount) {
       emitStatus({ phase, index: 0, total: 2, speed: 1 });
       expect(byId('player-status').textContent).toBe(label);
+    }
+  });
+
+  it('shows the transport exactly for live or recoverable sessions', () => {
+    const visible: PlaybackStatus['phase'][] = ['preparing', 'connecting', 'generating', 'buffering', 'playing', 'paused', 'error'];
+    for (const phase of visible) {
+      emitStatus({ phase, index: 0, total: 2, speed: 1 });
+      expect(byId('player-transport').hidden).toBe(false);
+    }
+    const hidden: PlaybackStatus['phase'][] = ['idle', 'stopped', 'complete'];
+    for (const phase of hidden) {
+      emitStatus({ phase, index: 0, total: 0, speed: 1 });
+      expect(byId('player-transport').hidden).toBe(true);
     }
   });
 });
@@ -286,13 +308,16 @@ describe('transport click wiring', () => {
 
 describe('accessible names, tooltips, and structure', () => {
   const iconOnly = () => [
-    ['prev', 'Previous section'],
+    ['prev', 'Previous segment'],
     ['play-pause', 'Pause narration'],
-    ['next', 'Next section'],
+    ['next', 'Next segment'],
     ['stop', 'Stop narration'],
   ] as const;
 
   it('gives every icon-only control an accurate aria-label and tooltip', () => {
+    // Play/Pause reads "Pause narration" while the session is playing; the
+    // other three labels are static.
+    emitStatus({ phase: 'playing', index: 0, total: 3, speed: 1 });
     for (const [id, hint] of iconOnly()) {
       const button = byId<HTMLButtonElement>(id);
       expect(button.getAttribute('aria-label')).toBe(hint);
@@ -306,9 +331,33 @@ describe('accessible names, tooltips, and structure', () => {
     expect(playPause().dataset.tooltip).toBe('Resume narration');
   });
 
+  it('labels the disabled Play/Pause control as Play narration', () => {
+    // Mid-session fetch phases cannot be paused or resumed yet.
+    emitStatus({ phase: 'connecting', index: 0, total: 4, speed: 1 });
+    expect(playPause().disabled).toBe(true);
+    expect(playPause().getAttribute('aria-label')).toBe('Play narration');
+    expect(iconPath(playPause())).toBe(PLAY_PATH);
+  });
+
   it('gives the labelled start buttons their tooltip hints', () => {
     expect(byId<HTMLButtonElement>('read-page').dataset.tooltip).toBe('Read this page');
     expect(byId<HTMLButtonElement>('read-selection').dataset.tooltip).toBe('Read selected text');
+  });
+
+  it('treats the two start actions as equivalent controls', () => {
+    const page = byId<HTMLButtonElement>('read-page');
+    const selection = byId<HTMLButtonElement>('read-selection');
+    expect(page.className).toBe(selection.className);
+    expect(page.className).toContain('start-btn');
+    expect(page.querySelector('.icon')).not.toBeNull();
+    expect(selection.querySelector('.icon')).not.toBeNull();
+  });
+
+  it('gives every transport button the unified icon-btn treatment', () => {
+    for (const id of ['prev', 'play-pause', 'next', 'stop'] as const) {
+      expect(byId<HTMLButtonElement>(id).classList.contains('icon-btn')).toBe(true);
+    }
+    expect(byId<HTMLButtonElement>('play-pause').classList.contains('icon-btn--playpause')).toBe(true);
   });
 
   it('marks every inline SVG as decorative and non-focusable', () => {

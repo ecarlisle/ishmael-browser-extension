@@ -124,17 +124,20 @@ body {
 }
 
 #panel-listen {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
-/* The Listen surface reads as one compact media player: session status on
- * top, the two start actions, and a transport row. The card keeps generous
- * vertical clearance so CSS tooltips can appear without covering controls. */
+/* The Listen surface reads as one compact media-player section: session
+ * status on top, the two start actions, and a unified transport row. The
+ * section is top-aligned so the player feels anchored rather than floating
+ * in empty space. Tooltips point downward into reserved clearance between
+ * the start row and the transport row, and past the transport row into the
+ * panel's own bottom padding (they are overlays, never layout elements). */
 .player {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 14px;
+  gap: 10px;
+  padding: 14px 12px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -162,38 +165,55 @@ body {
   color: var(--text-muted);
 }
 
+/* The two start actions are equivalent: same fill, radius, icon-plus-label
+ * treatment, hover and focus behavior. They are the popup's primary
+ * actions, so they use the filled teal style everywhere else .primary does. */
 .player__start {
   display: flex;
   justify-content: center;
   gap: 8px;
-  /* Clearance for the start buttons' downward tooltips. */
-  margin-bottom: 16px;
+  /* Clearance for the start buttons' downward tooltips, so a tooltip never
+   * covers the transport row beneath. */
+  margin-bottom: 26px;
 }
 
-.player__start button {
-  flex: 0 1 auto;
-  min-height: 36px;
+.start-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 8px;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  border-radius: 9px;
 }
 
+.start-btn:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+/* Playback transport: one unified circle-button group. Previous, Next, and
+ * Stop are secondary; Play/Pause is the visual primary (larger, filled). */
 .player__transport {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  /* Clearance for the transport buttons' downward tooltips. */
-  margin-bottom: 16px;
+  gap: 10px;
+  /* Small gap before the panel edge; the transport's own tooltips are
+   * overlays that may extend past the panel into the footer area. */
+  margin-bottom: 4px;
 }
 
-/* Round, icon-only transport buttons. */
 .icon-btn {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -207,12 +227,13 @@ body {
 .icon-btn:hover:not(:disabled) {
   background: #f2f1ec;
   border-color: #d9d6cd;
+  color: var(--accent-strong);
 }
 
 /* The prominent central Play/Pause control. */
 .icon-btn--playpause {
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
@@ -223,17 +244,39 @@ body {
   border-color: var(--accent-strong);
 }
 
-.icon-btn--playpause .icon {
-  width: 22px;
-  height: 22px;
+/* Disabled transport controls stay legible: neutral surfaces and a muted
+ * icon instead of a faded version of their enabled color. The disabled
+ * attribute (not color alone) conveys unavailability. */
+.icon-btn:disabled {
+  background: #f4f3ef;
+  border-color: var(--border);
+  color: #9b9faa;
+  opacity: 0.7;
 }
 
-/* Decorative inline icons: always `currentColor`, never focusable. */
+.icon-btn--playpause:disabled {
+  background: #ecebe6;
+  border-color: #e4e2dc;
+  color: #9b9faa;
+}
+
+/* Decorative inline icons: always `currentColor`, never focusable. Sizes are
+ * scaled per context (labels vs. icon-only buttons vs. the primary control). */
 .icon {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex: none;
+}
+
+.icon-btn .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn--playpause .icon {
+  width: 24px;
+  height: 24px;
 }
 
 /* Visible tooltips: pure CSS, driven by the data-tooltip attribute. They

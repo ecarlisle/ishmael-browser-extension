@@ -44,6 +44,7 @@ const elements = {
   prev: byId<HTMLButtonElement>('prev'),
   next: byId<HTMLButtonElement>('next'),
   stop: byId<HTMLButtonElement>('stop'),
+  transport: byId<HTMLDivElement>('player-transport'),
   playerStatus: byId<HTMLParagraphElement>('player-status'),
   playerMeta: byId<HTMLParagraphElement>('player-meta'),
   status: byId<HTMLParagraphElement>('status'),
@@ -161,7 +162,7 @@ function playbackPhaseLabel(phase: PlaybackStatus['phase']): string {
     case 'paused':
       return 'Paused';
     case 'complete':
-      return 'Complete';
+      return 'Finished';
     case 'stopped':
       return 'Stopped';
     case 'error':
@@ -176,7 +177,7 @@ function playbackPhaseLabel(phase: PlaybackStatus['phase']): string {
  * "Segment 2 of 4 — Connecting", or a bare state when no count exists.
  */
 function segmentIndicator(status: PlaybackStatus): string {
-  if (status.phase === 'idle') return 'No active session';
+  if (status.phase === 'idle') return 'Ready to read';
   if (status.phase === 'stopped') return 'Stopped';
   if (status.total > 0) {
     const shown = Math.min(status.index + 1, status.total);
@@ -186,11 +187,17 @@ function segmentIndicator(status: PlaybackStatus): string {
 }
 
 /**
- * The lower, informational line: which session the phase belongs to. It
- * complements the headline without repeating or contradicting it.
+ * The lower, informational line: which session the phase belongs to, or the
+ * next step available to the user. It complements the headline without
+ * repeating or contradicting it.
  */
 function sessionDetailText(status: PlaybackStatus): string {
   switch (status.phase) {
+    case 'idle':
+    case 'stopped':
+      return 'Choose page or selection to begin.';
+    case 'complete':
+      return 'Read page or Read selection to play again.';
     case 'preparing':
       return lastSource === 'page'
         ? 'Preparing page…'
@@ -202,7 +209,6 @@ function sessionDetailText(status: PlaybackStatus): string {
     case 'buffering':
     case 'playing':
     case 'paused':
-    case 'complete':
       return lastSource === 'page' ? 'Reading page' : lastSource === 'selection' ? 'Reading selection' : '';
     default:
       return '';
@@ -210,14 +216,18 @@ function sessionDetailText(status: PlaybackStatus): string {
 }
 
 /** Makes the central Play/Pause control reflect the current phase: icon,
- * accessible name, tooltip, and enabled state change together. */
+ * accessible name, tooltip, and enabled state change together. The glyph
+ * always shows the action that would happen: Pause while playing, Play
+ * otherwise (including when disabled mid-session). */
 function renderPlayPause(status: PlaybackStatus): void {
   const canToggle = status.phase === 'playing' || status.phase === 'paused';
+  const playing = status.phase === 'playing';
   const paused = status.phase === 'paused';
+  const label = playing ? 'Pause narration' : paused ? 'Resume narration' : 'Play narration';
   elements.playPause.disabled = !canToggle;
-  elements.playPause.innerHTML = paused ? PLAY_ICON : PAUSE_ICON;
-  elements.playPause.setAttribute('aria-label', paused ? 'Resume narration' : 'Pause narration');
-  elements.playPause.dataset.tooltip = paused ? 'Resume narration' : 'Pause narration';
+  elements.playPause.innerHTML = playing ? PAUSE_ICON : PLAY_ICON;
+  elements.playPause.setAttribute('aria-label', label);
+  elements.playPause.dataset.tooltip = label;
 }
 
 /**
@@ -234,6 +244,13 @@ const NAVIGABLE_PHASES: readonly PlaybackStatus['phase'][] = [
   'error',
 ];
 
+/**
+ * Phases where the playback transport is pointless: nothing is running.
+ * The transport group is hidden so the player does not offer controls whose
+ * actions would do nothing (the start actions remain available above).
+ */
+const TRANSPORT_HIDDEN_PHASES: readonly PlaybackStatus['phase'][] = ['idle', 'stopped', 'complete'];
+
 function renderStatus(status: PlaybackStatus): void {
   renderPlayPause(status);
 
@@ -241,6 +258,7 @@ function renderStatus(status: PlaybackStatus): void {
   elements.prev.disabled = !navigable;
   elements.next.disabled = !navigable;
   elements.stop.disabled = !navigable;
+  elements.transport.hidden = TRANSPORT_HIDDEN_PHASES.includes(status.phase);
 
   elements.playerStatus.textContent = segmentIndicator(status);
   elements.playerMeta.textContent = sessionDetailText(status);
