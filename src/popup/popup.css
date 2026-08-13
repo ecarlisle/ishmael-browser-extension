@@ -42,6 +42,7 @@
   --radius-xl: 22px;
 
   --focus: var(--primary);
+
   color-scheme: dark;
 }
 
@@ -57,7 +58,7 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--on-surface);
-  font: 14px/1.45 "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 14px/1.45 Geist, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 .popup {
@@ -75,7 +76,7 @@ body {
   height: 18px;
   flex: none;
   fill: none;
-  stroke: currentColor;
+  stroke: currentcolor;
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -104,7 +105,7 @@ body {
   margin: -1px;
   padding: 0;
   overflow: hidden;
-  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }
@@ -658,6 +659,7 @@ select:focus-visible {
 }
 
 .stop-link {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -696,7 +698,6 @@ select:focus-visible {
 .stop-link[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
-  top: calc(100% + 6px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 30;
@@ -711,6 +712,18 @@ select:focus-visible {
   pointer-events: none;
   opacity: 0;
   transition: opacity 120ms ease;
+}
+
+/* Transport row tooltips drop below their buttons — the card has generous
+ * clearance there. The Stop link sits right above the card's bottom edge, so
+ * its tooltip opens upward instead to avoid being clipped by .player's
+ * overflow: hidden. */
+.player__transport button[data-tooltip]::after {
+  top: calc(100% + 6px);
+}
+
+.stop-link[data-tooltip]::after {
+  bottom: calc(100% + 6px);
 }
 
 .player button[data-tooltip]:hover::after,
@@ -785,7 +798,7 @@ select:focus-visible {
 }
 
 .nav-note {
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: none;

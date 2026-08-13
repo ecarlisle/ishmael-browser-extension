@@ -57,7 +57,13 @@
                 </div>
               </div>
 
-              <button id="onboarding-help-toggle" type="button" class="link-btn">
+              <button
+                id="onboarding-help-toggle"
+                type="button"
+                class="link-btn"
+                aria-expanded="false"
+                aria-controls="onboarding-help-content"
+              >
                 <svg class="icon icon--sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <circle cx="12" cy="12" r="9" />
                   <path d="M9.5 9.2a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.5" />
@@ -112,7 +118,7 @@
           </button>
         </header>
 
-        <section id="panel-listen" class="panel" tabindex="0">
+        <section id="panel-listen" class="panel" role="tabpanel" aria-labelledby="tab-listen" tabindex="0">
           <h2 class="visually-hidden">Listen</h2>
           <div class="player">
             <div id="segment-tracker" class="chip" aria-live="polite" role="status" hidden>
@@ -150,7 +156,7 @@
               Stop
             </button>
 
-            <div id="progress-track" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+            <div id="progress-track" class="progress-track" role="progressbar" aria-label="Narration progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
               <div id="progress-fill" class="progress-fill"></div>
             </div>
           </div>
@@ -174,7 +180,7 @@
           </div>
         </section>
 
-        <section id="panel-settings" class="panel" tabindex="0" hidden>
+        <section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
           <h2 class="visually-hidden">Voice Settings</h2>
           <div class="panel-intro">
             <h3>Voice Settings</h3>
@@ -375,7 +381,7 @@
         </div>
 
         <footer class="help-footer">
-          <span>Ishmael v1.0.0</span>
+          <span id="app-version">Ishmael</span>
         </footer>
       </section>
 

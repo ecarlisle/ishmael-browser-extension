@@ -58,6 +58,7 @@ const chromeStub = {
         stateListeners.push(listener);
       },
     },
+    getManifest: () => ({ version: '1.0.0' }),
   },
 };
 
@@ -294,6 +295,58 @@ describe('transport click wiring', () => {
   });
 });
 
+describe('views and navigation', () => {
+  afterEach(() => {
+    // Leave Listen selected so later describe blocks see the default tab.
+    byId<HTMLButtonElement>('tab-listen').click();
+  });
+
+  it('Help & Privacy returns to whichever app tab was active when it opened', () => {
+    byId<HTMLButtonElement>('tab-settings').click();
+    expect(byId<HTMLButtonElement>('tab-settings').getAttribute('aria-selected')).toBe('true');
+
+    byId<HTMLButtonElement>('open-help').click();
+    expect(byId('view-help').hasAttribute('hidden')).toBe(false);
+    expect(byId('view-app').hasAttribute('hidden')).toBe(true);
+
+    byId<HTMLButtonElement>('close-help').click();
+    expect(byId('view-app').hasAttribute('hidden')).toBe(false);
+    expect(byId('view-help').hasAttribute('hidden')).toBe(true);
+    expect(byId<HTMLButtonElement>('tab-settings').getAttribute('aria-selected')).toBe('true');
+    expect(byId<HTMLButtonElement>('tab-listen').getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('moves focus into Help on open and back to the Help icon on close', () => {
+    byId<HTMLButtonElement>('open-help').click();
+    expect(document.activeElement?.id).toBe('close-help');
+
+    byId<HTMLButtonElement>('close-help').click();
+    expect(document.activeElement?.id).toBe('open-help');
+  });
+});
+
+describe('progress bar', () => {
+  it('stays hidden until the transport is navigable, then tracks segment completion', () => {
+    const track = byId<HTMLDivElement>('progress-track');
+
+    emitStatus({ phase: 'preparing', index: 0, total: 0, speed: 1 });
+    expect(track.hidden).toBe(true);
+
+    emitStatus({ phase: 'connecting', index: 0, total: 4, speed: 1 });
+    expect(track.hidden).toBe(false);
+    expect(track.getAttribute('aria-valuenow')).toBe('0');
+
+    // Playing counts its current segment as half-complete: (1 + 0.5) / 4 = 37.5%.
+    emitStatus({ phase: 'playing', index: 1, total: 4, speed: 1 });
+    expect(track.hidden).toBe(false);
+    expect(track.getAttribute('aria-valuenow')).toBe('38');
+
+    // Complete is not a navigable phase, so the transport-tied progress bar hides again.
+    emitStatus({ phase: 'complete', index: 3, total: 4, speed: 1 });
+    expect(track.hidden).toBe(true);
+  });
+});
+
 describe('accessible names, tooltips, and structure', () => {
   const iconOnly = () => [
     ['prev', 'Previous section'],
@@ -362,5 +415,61 @@ describe('tooltip presentation', () => {
     expect(css).toMatch(/button\[data-tooltip\]:focus::after/);
     expect(css).toMatch(/pointer-events:\s*none/);
     expect(css).toMatch(/button\[data-tooltip\]:disabled::after/);
+  });
+});
+
+// This block re-imports the controller against a fresh document and a stateful
+// chrome stub, since the onboarding → app transition depends on hasApiKey
+// flipping between two GET_SETTINGS responses — something the shared fixture
+// above (a fixed, always-configured settings response) cannot exercise. It
+// runs last so it does not disturb the shared DOM/module state the earlier
+// describe blocks depend on.
+describe('onboarding to app transition', () => {
+  it('starts on onboarding, saves a key, and switches to the app view with focus moved', async () => {
+    let hasKey = false;
+    const listeners: RuntimeListener[] = [];
+    const stub = {
+      runtime: {
+        sendMessage: vi.fn((message: unknown): Promise<unknown> => {
+          switch (messageType(message)) {
+            case 'GET_SETTINGS':
+              return Promise.resolve({
+                settings: { hasApiKey: hasKey, voiceId: '', model: 's2.1-pro-free', speed: 1, mood: 'none' },
+              });
+            case 'GET_STATUS':
+              return Promise.resolve({ status: createIdleStatus() });
+            case 'SAVE_SETTINGS':
+              hasKey = true;
+              return Promise.resolve({});
+            default:
+              return Promise.resolve(undefined);
+          }
+        }),
+        onMessage: {
+          addListener: (listener: RuntimeListener) => {
+            listeners.push(listener);
+          },
+        },
+        getManifest: () => ({ version: '1.0.0' }),
+      },
+    };
+
+    vi.resetModules();
+    vi.stubGlobal('chrome', stub);
+    document.body.innerHTML = popupBodyHtml();
+    await import('./popup');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(byId('view-onboarding').hasAttribute('hidden')).toBe(false);
+    expect(byId('view-app').hasAttribute('hidden')).toBe(true);
+    expect(document.activeElement?.id).toBe('onboarding-api-key');
+
+    byId<HTMLInputElement>('onboarding-api-key').value = 'sk-test-key';
+    byId<HTMLButtonElement>('onboarding-save-key').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(byId('view-onboarding').hasAttribute('hidden')).toBe(true);
+    expect(byId('view-app').hasAttribute('hidden')).toBe(false);
+    expect(document.activeElement?.id).toBe('open-help');
   });
 });

@@ -69,6 +69,7 @@ const elements = {
   progressTrack: byId<HTMLDivElement>('progress-track'),
   progressFill: byId<HTMLDivElement>('progress-fill'),
   status: byId<HTMLParagraphElement>('status'),
+  appVersion: byId<HTMLSpanElement>('app-version'),
 };
 
 /** The source of the most recent narration the popup started (unknown when
@@ -84,14 +85,29 @@ let setupComplete = false;
 /** Which app tab was active before Help & Privacy was opened, so closing it returns there. */
 let tabBeforeHelp: HTMLButtonElement = elements.tabListen;
 
+/** The view last shown by showView, so it only moves focus on a real transition. */
+let currentView: View | null = null;
+
 /**
  * Switches the popup between onboarding, the main app, and Help & Privacy.
- * Only one top-level view is visible at a time.
+ * Only one top-level view is visible at a time. On a real transition, focus
+ * moves into the newly shown view — otherwise the element that had focus
+ * gets hidden and the browser drops focus to <body>, silently stranding
+ * keyboard and screen-reader users.
  */
 function showView(view: View): void {
+  const changed = view !== currentView;
+  currentView = view;
   elements.viewOnboarding.hidden = view !== 'onboarding';
   elements.viewApp.hidden = view !== 'app';
   elements.viewHelp.hidden = view !== 'help';
+  if (changed) focusView(view);
+}
+
+function focusView(view: View): void {
+  if (view === 'onboarding') elements.onboardingApiKey.focus();
+  else if (view === 'help') elements.closeHelp.focus();
+  else elements.openHelp.focus();
 }
 
 /**
@@ -336,7 +352,10 @@ async function readWithSource(source: 'page' | 'selection'): Promise<void> {
 
 async function saveKeyFrom(input: HTMLInputElement): Promise<void> {
   const apiKey = input.value.trim();
-  if (!apiKey) return;
+  if (!apiKey) {
+    showError('Enter your Fish Audio API key.');
+    return;
+  }
   try {
     await send({ target: 'service-worker', type: 'SAVE_SETTINGS', patch: { apiKey } });
     input.value = '';
@@ -439,7 +458,9 @@ function wire(): void {
     elements.onboardingToggleVisibility.setAttribute('aria-label', showing ? 'Show API key' : 'Hide API key');
   });
   elements.onboardingHelpToggle.addEventListener('click', () => {
-    elements.onboardingHelpContent.hidden = !elements.onboardingHelpContent.hidden;
+    const nowHidden = !elements.onboardingHelpContent.hidden;
+    elements.onboardingHelpContent.hidden = nowHidden;
+    elements.onboardingHelpToggle.setAttribute('aria-expanded', String(!nowHidden));
   });
 
   elements.apiKey.addEventListener('input', () => {
@@ -471,6 +492,7 @@ function wire(): void {
 
 async function init(): Promise<void> {
   wire();
+  elements.appVersion.textContent = `Ishmael v${chrome.runtime.getManifest().version}`;
   renderStatus(createIdleStatus());
   try {
     await refreshSettings();
