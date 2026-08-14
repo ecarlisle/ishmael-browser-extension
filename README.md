@@ -104,11 +104,12 @@ optimistic guess:
 | `Error` | Synthesis or playback failed; the specific, redacted message appears in the status bar below the player. |
 | (no session) | Nothing has been started (`No active session`). |
 
-The headline reads `Segment N of M — State` whenever the chunk count is known
-(`Segment 2 of 4 — Connecting`), and a bare state otherwise (`Preparing`,
-`Stopped`, `Complete`). The line beneath adds the session's source detail
-without repeating or contradicting the headline. States transition
-immediately when their event fires — there is no artificial debounce delay.
+The player shows this as two pieces: a short, always-present headline above
+the transport controls (`No active session`, `Reading page`, `Paused`,
+`Narration error`, …), and a small segment chip that appears once the chunk
+count is known, reading `Segment N of M — State` (for example `Segment 2 of
+4 — Connecting`). States transition immediately when their event fires —
+there is no artificial debounce delay.
 
 Ishmael currently uses the ordinary REST `POST /v1/tts → MP3` flow for every
 chunk; there is no SSE or WebSocket transport. Consequently:
@@ -118,8 +119,11 @@ chunk; there is no SSE or WebSocket transport. Consequently:
 - `Buffering` appears only when the pipeline genuinely awaits playable audio
   (first stream bytes in hand, a new chunk attached but not yet started, or a
   media `waiting` event).
-- There is no percentage progress, because the API provides no numeric
-  progress information.
+- Fish Audio itself reports no numeric progress within a chunk. The popup
+  shows a thin progress bar under the player, but it is a local estimate —
+  segments completed (plus half credit for the segment currently playing)
+  divided by the total segment count — not a byte-accurate value from the
+  API.
 
 ## Current prototype limitations
 
@@ -243,37 +247,45 @@ handshake.
 
 ## Popup layout
 
-The popup is one fixed-size window (340×600) with two internal views switched
-by a compact tab bar: **Listen** and **Voice Settings** (API key, voice/reference
-ID, model, mood, speed, and save/reset controls). The popup never resizes when
-the user navigates between views.
+The popup is one fixed-size window (360×600) in a dark "Abyssal Deep" theme
+(bioluminescent-cyan accents on deep-navy surfaces), built as three top-level
+views that swap by hiding/showing rather than by resizing the window:
+**Onboarding**, the main **app** (Listen / Voice Settings), and **Help &
+Privacy**.
+
+**Onboarding** is shown until an API key is saved — a single card asking for
+the Fish Audio API key, with a show/hide toggle, a "Where do I find my API
+key?" disclosure, and a **Save key** button. Saving a key switches straight to
+the app.
 
 **Listen** presents a compact media-player card instead of a loose row of
-buttons. The headline line shows the segment indicator with its state — for
-example `No active session`, `Preparing`, `Stopped`, or `Segment 2 of 4 —
-Connecting` — and the line beneath adds the session's source detail
-(`Preparing page…`, `Reading page`, `Reading selection`). Below sit the two
-start actions — **Read page** (primary) and **Read selection** — and a
-transport row of icon buttons: Previous, Play/Pause, Next, and Stop. Once
-narration begins, the central Play/Pause control is the prominent action and
-its glyph and accessible label flip between pause and resume. Every icon
-button carries an `aria-label`, and a small CSS-rendered tooltip (from the
-same `data-tooltip` attribute) appears on hover and keyboard focus; the
-decorative inline SVG icons are `aria-hidden`. Controls are disabled until
-their action is actually available.
+buttons: a segment chip (`Segment 2 of 4 — Connecting`, shown once the chunk
+count is known), a short headline (`No active session`, `Reading page`,
+`Paused`, `Narration error`, …), a transport row of icon buttons (Previous,
+Play/Pause, Next), a **Stop** link, and a thin progress bar (see
+[Playback states](#playback-states)). Below the card sit the two start
+actions, **Read page** (primary) and **Read selection**. Once narration
+begins, the central Play/Pause control is the prominent action and its glyph
+and accessible label flip between pause and resume. Every icon button carries
+an `aria-label`, and a small CSS-rendered tooltip (from the same
+`data-tooltip` attribute) appears on hover and keyboard focus; the decorative
+inline SVG icons are `aria-hidden`. Controls are disabled until their action
+is actually available.
 
-Tabs follow the ARIA tabs pattern: `role="tablist"/"tab"/"tabpanel"`, roving
-tabindex, arrow-key (plus Home/End) navigation, `aria-selected` state, and
-visible focus outlines. Each field has an explicit label; explanatory text is
-a click away in the compact **Settings help** disclosure, and the full privacy
-note lives in the **Privacy & data** footer disclosure, so the primary
-settings stay unobstructed.
+**Voice Settings** groups API key management (Save/Replace/Remove — see
+[Remove the saved key](#remove-the-saved-key)) with voice/reference ID, model,
+mood, and narration speed. The panel scrolls internally if its content
+exceeds the fixed window height; the popup itself never resizes.
 
-The popup opens on **Voice Settings** when an API key or reference ID is
-still missing (mirroring the old auto-expanded disclosure), and on **Listen**
-when everything is configured. The settings view fits its fixed area without
-scrolling; if the browser window is unusually short, the active view scrolls
-rather than clipping.
+Listen and Voice Settings are switched by a **bottom navigation bar**
+(`role="tablist"`/`"tab"`, each panel `role="tabpanel"` with a matching
+`aria-labelledby`), not a top tab strip. A help icon in the app header opens
+**Help & Privacy** — a dedicated screen (Settings Help, Privacy & Data,
+Troubleshooting) reachable and dismissable without losing your place: closing
+it returns to whichever of Listen/Voice Settings was active, with focus moved
+back to the help icon. Every top-level view transition (onboarding → app, app
+↔ Help) moves keyboard/screen-reader focus into the new view rather than
+leaving it stranded on a now-hidden element.
 
 ## Troubleshooting: "Background audio did not become ready"
 
@@ -367,7 +379,7 @@ The popup's **Voice / reference ID** field accepts either:
   [models overview](https://docs.fish.audio/developer-guide/models-pricing/models-overview)).
 
 Paste the ID into the field, pick a model (default `s2.1-pro-free`), and click
-**Save voice settings**. Ishmael does not browse or pre-validate the voice
+**Save Voice Settings**. Ishmael does not browse or pre-validate the voice
 library: Fish Audio validates the ID when narration starts, and a rejected ID
 produces a clear, actionable error. The reference ID is sent to Fish Audio as
 `reference_id` in the request body; it is never used as the API key or as the
@@ -460,9 +472,9 @@ settings handling. Extension runtime behavior is best verified manually:
 
 ## Remove the saved key
 
-Open the popup → in the **Fish Audio API key** section click **Remove key**.
-The key is deleted from `chrome.storage.local`. You can also clear all
-extension data at `chrome://extensions` → *Details* → *Remove*.
+Open the popup → **Settings** tab → in the **Fish Audio API key** section
+click **Remove**. The key is deleted from `chrome.storage.local`. You can also
+clear all extension data at `chrome://extensions` → *Details* → *Remove*.
 
 ## Why HTTP MP3 generation before streaming
 
