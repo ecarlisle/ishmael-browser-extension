@@ -30,7 +30,7 @@ export type PlaybackPhase =
   | 'stopped'
   | 'error';
 
-export const PLAYBACK_PHASES: readonly PlaybackPhase[] = [
+const PLAYBACK_PHASES: readonly PlaybackPhase[] = [
   'idle',
   'preparing',
   'connecting',

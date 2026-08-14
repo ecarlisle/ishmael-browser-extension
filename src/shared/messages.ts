@@ -10,8 +10,6 @@ import { MOODS, type Mood, type Settings } from './settings';
 import { sanitizePlaybackStatus, type PlaybackStatus } from './playback';
 import { isRecord } from './settings';
 
-export type MessageTarget = 'service-worker' | 'offscreen' | 'content';
-
 export type ExtensionMessage =
   // Popup → service worker
   | { target: 'service-worker'; type: 'GET_SETTINGS' }

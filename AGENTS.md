@@ -235,6 +235,16 @@ Handle expected failures explicitly, including:
 
 User-facing errors should be concise and actionable. Logs must not contain credentials or complete extracted articles.
 
+## Responding to static-analysis findings
+
+When `fallow` (or any other static-analysis tool) flags dead code — an unused export, an unused file, an unresolved import — treat it as a real signal about the code, not noise to silence. Suppressing a finding is not a fix.
+
+* If the code is truly dead, delete it.
+* If a symbol is exported but only ever used inside the file that defines it, remove `export` rather than adding a suppression comment. Verify first with a repository-wide search (production and test files) that nothing else imports it. This is usually the correct fix and carries no risk, since nothing else can depend on a symbol that was never imported.
+* Only suppress a finding after confirming no real fix applies — for example, a file that is a build entry point referenced by a config string rather than an `import` (Vite configs, content-script/offscreen entry points). Prefer a config-level fix (`.fallowrc.json`'s `entry` or `ignoreUnresolvedImports`) over an inline comment.
+* Never use a whole-file suppression (e.g. `fallow-ignore-file`). Suppress the specific finding kind so unrelated future issues in that file are not silently hidden.
+* Before trusting that a suppression or config entry actually works, verify it by running the tool — do not assume a comment or config pattern takes effect just because it looks plausible.
+
 ## Testing
 
 Tests must be deterministic and must never call the live Fish Audio API.

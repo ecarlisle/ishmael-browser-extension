@@ -4,12 +4,12 @@
 // the privacy trade-off) and must never appear in messages back to the popup,
 // logs, or error strings.
 
-export const MODELS = ['s2.1-pro-free', 's2.1-pro', 's2-pro', 's1'] as const;
+const MODELS = ['s2.1-pro-free', 's2.1-pro', 's2-pro', 's1'] as const;
 export type Model = (typeof MODELS)[number];
 
-export const DEFAULT_MODEL: Model = 's2.1-pro-free';
-export const MIN_SPEED = 0.5;
-export const MAX_SPEED = 2;
+const DEFAULT_MODEL: Model = 's2.1-pro-free';
+const MIN_SPEED = 0.5;
+const MAX_SPEED = 2;
 export const DEFAULT_SPEED = 1;
 
 /**
@@ -37,7 +37,7 @@ export const MOODS = [
 ] as const;
 export type Mood = (typeof MOODS)[number];
 
-export const DEFAULT_MOOD: Mood = 'none';
+const DEFAULT_MOOD: Mood = 'none';
 
 export type Settings = {
   apiKey: string;

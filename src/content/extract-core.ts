@@ -43,7 +43,7 @@ const CANDIDATE_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, blockquote, li, figcaptio
 /** Inline elements whose authored emphasis is preserved. Not `<b>`/`<i>`. */
 const EMPHASIS_TAGS = new Set(['STRONG', 'EM']);
 
-export function kindForElement(element: Element): SegmentKind | null {
+function kindForElement(element: Element): SegmentKind | null {
   const tag = element.tagName;
   if (tag === 'P') return 'paragraph';
   if (tag.startsWith('H') && tag.length === 2 && tag >= 'H1' && tag <= 'H6') return 'heading';
@@ -302,7 +302,7 @@ export function extractFromFallback(document: Document): NarrationSegment[] | nu
  * found. If Readability itself fails, we fall back to conservative
  * extraction rather than failing the whole page.
  */
-export function extractArticle(document: Document): NarrationSegment[] | null {
+function extractArticle(document: Document): NarrationSegment[] | null {
   try {
     const readability = extractWithReadability(document);
     if (readability) return readability;

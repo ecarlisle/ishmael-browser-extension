@@ -10,7 +10,11 @@
     "test:watch": "vitest",
     "build": "node scripts/build.mjs",
     "icons": "node scripts/render-icons.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "fallow": "pnpm exec fallow",
+    "fallow:dead-code": "pnpm exec fallow dead-code --unused-files --unused-deps",
+    "fallow:audit": "pnpm exec fallow audit --changed-since main",
+    "fallow:fix-dry": "pnpm exec fallow fix --dry-run"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0"
@@ -19,6 +23,7 @@
     "@types/chrome": "^0.2.5",
     "@types/jsdom": "^28.0.3",
     "@types/node": "^26.1.2",
+    "fallow": "^3.16.0",
     "jsdom": "^30.0.1",
     "typescript": "^5.9.3",
     "vite": "^8.2.0",

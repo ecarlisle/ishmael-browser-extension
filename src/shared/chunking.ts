@@ -100,7 +100,7 @@ function fallbackSplitSentences(text: string): string[] {
 // Long-text splitting
 // ---------------------------------------------------------------------------
 
-export type TextPiece = { text: string; start: number };
+type TextPiece = { text: string; start: number };
 
 /**
  * Splits text into pieces of at most `maxChars`, preferring sentence
@@ -112,7 +112,7 @@ export type TextPiece = { text: string; start: number };
  * Pieces are contiguous: piece[i].text occupies
  * `text.slice(piece[i].start, piece[i + 1]?.start)`.
  */
-export function splitLongTextPieces(text: string, maxChars: number = MAX_CHUNK_CHARS): TextPiece[] {
+function splitLongTextPieces(text: string, maxChars: number = MAX_CHUNK_CHARS): TextPiece[] {
   const pieces: TextPiece[] = [];
 
   const pushWords = (sentence: string, sentenceStart: number): void => {

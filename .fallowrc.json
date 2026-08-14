@@ -1,0 +1,4 @@
+{
+  "ignoreUnresolvedImports": ["./offscreen.js"],
+  "entry": ["src/content/extract.ts", "vite.content.config.ts", "vite.offscreen.config.ts"]
+}
