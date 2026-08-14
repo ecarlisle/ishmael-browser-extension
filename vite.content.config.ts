@@ -1,3 +1,4 @@
+// fallow-ignore-file
 import { defineConfig } from 'vite';
 
 // Content script build. Chrome content scripts cannot use ES module imports,

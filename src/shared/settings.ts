@@ -4,11 +4,15 @@
 // the privacy trade-off) and must never appear in messages back to the popup,
 // logs, or error strings.
 
+// fallow-ignore-next-line unused-export
 export const MODELS = ['s2.1-pro-free', 's2.1-pro', 's2-pro', 's1'] as const;
 export type Model = (typeof MODELS)[number];
 
+// fallow-ignore-next-line unused-export
 export const DEFAULT_MODEL: Model = 's2.1-pro-free';
+// fallow-ignore-next-line unused-export
 export const MIN_SPEED = 0.5;
+// fallow-ignore-next-line unused-export
 export const MAX_SPEED = 2;
 export const DEFAULT_SPEED = 1;
 
@@ -37,6 +41,7 @@ export const MOODS = [
 ] as const;
 export type Mood = (typeof MOODS)[number];
 
+// fallow-ignore-next-line unused-export
 export const DEFAULT_MOOD: Mood = 'none';
 
 export type Settings = {

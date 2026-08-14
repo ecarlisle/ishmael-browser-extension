@@ -1,3 +1,5 @@
+// fallow-ignore-file
+
 // Content script entry point.
 //
 // Injected on demand by the service worker (after an explicit user action),

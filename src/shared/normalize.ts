@@ -14,11 +14,4 @@ export function normalizeWhitespace(text: string): string {
   return text.replace(REMOVE, '').replace(SPACE, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Removes characters that are not valid within a Fish Audio narration chunk:
- * nothing meaningful is removed beyond what `normalizeWhitespace` already
- * handles. Exists so callers have one entry point for "clean this text".
- */
-export function cleanNarrationText(text: string): string {
-  return normalizeWhitespace(text);
-}
+

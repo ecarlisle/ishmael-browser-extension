@@ -20,9 +20,12 @@ import { isPongResponse, isStartReadingAck, type ExtensionMessage } from '../sha
 /** Max PING polls before declaring the offscreen controller not ready. */
 export const READY_MAX_ATTEMPTS = 8;
 /** Delay between PING polls (~2 s total budget). */
+// fallow-ignore-next-line unused-export
 export const READY_POLL_INTERVAL_MS = 250;
 /** START_READING delivery attempts once the controller is ready. */
+// fallow-ignore-next-line unused-export
 export const START_READING_MAX_ATTEMPTS = 2;
+// fallow-ignore-next-line unused-export
 export const START_READING_RETRY_DELAY_MS = 200;
 
 /** The controller never answered PING within the budget. */

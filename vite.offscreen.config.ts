@@ -1,3 +1,4 @@
+// fallow-ignore-file
 import { defineConfig } from 'vite';
 
 // Offscreen audio controller build. public/offscreen.html loads it as a

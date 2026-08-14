@@ -112,6 +112,7 @@ export type TextPiece = { text: string; start: number };
  * Pieces are contiguous: piece[i].text occupies
  * `text.slice(piece[i].start, piece[i + 1]?.start)`.
  */
+// fallow-ignore-next-line unused-export
 export function splitLongTextPieces(text: string, maxChars: number = MAX_CHUNK_CHARS): TextPiece[] {
   const pieces: TextPiece[] = [];
 
