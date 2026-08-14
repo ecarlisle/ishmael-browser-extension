@@ -13,8 +13,7 @@ export type SegmentKind =
   | 'list-item'
   | 'caption';
 
-// fallow-ignore-next-line unused-export
-export const SEGMENT_KINDS: readonly SegmentKind[] = [
+const SEGMENT_KINDS: readonly SegmentKind[] = [
   'title',
   'heading',
   'paragraph',

@@ -29,7 +29,7 @@ Before reporting work complete, run `pnpm typecheck && pnpm test && pnpm build` 
 
 Four isolated extension contexts communicate only through validated messages (`src/shared/messages.ts`). Each has a hard responsibility boundary — moving logic across it is usually wrong:
 
-```
+```text
 popup (index.html + src/popup)
   │  user controls, settings, live status display — no extraction, no Fish calls, no long-running playback
   ▼
