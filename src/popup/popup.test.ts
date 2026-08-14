@@ -58,6 +58,7 @@ const chromeStub = {
         stateListeners.push(listener);
       },
     },
+    getManifest: () => ({ version: '1.0.0' }),
   },
 };
 
@@ -120,8 +121,8 @@ describe('player rendering by playback state', () => {
   it('renders a playing session with enabled transport and a segment indicator', () => {
     emitStatus({ phase: 'playing', index: 1, total: 5, speed: 1 });
 
-    expect(byId('player-status').textContent).toBe('Segment 2 of 5 — Playing');
-    expect(byId('player-meta').textContent).toBe('');
+    expect(byId('player-status').textContent).toBe('Reading');
+    expect(byId('player-meta').textContent).toBe('Segment 2 of 5 — Playing');
     expect(playPause().disabled).toBe(false);
     expect(byId<HTMLButtonElement>('prev').disabled).toBe(false);
     expect(byId<HTMLButtonElement>('next').disabled).toBe(false);
@@ -131,32 +132,37 @@ describe('player rendering by playback state', () => {
   it('renders the observable fetch-pipeline phases with the right labels and enablement', () => {
     // Preparing: session accepted, no chunk count yet — not navigable.
     emitStatus({ phase: 'preparing', index: 0, total: 0, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Preparing');
-    expect(byId('player-meta').textContent).toBe('Preparing narration…');
+    expect(byId('player-status').textContent).toBe('Preparing narration…');
+    expect(byId('player-meta').textContent).toBe('');
     expect(playPause().disabled).toBe(true);
     expect(byId<HTMLButtonElement>('prev').disabled).toBe(true);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
 
     // Connecting: the Fish request is in flight; chunk count is now known.
+    // The headline stays a stable "Reading" while the chip tracks the
+    // precise phase.
     emitStatus({ phase: 'connecting', index: 0, total: 4, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Segment 1 of 4 — Connecting');
+    expect(byId('player-status').textContent).toBe('Reading');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 4 — Connecting');
     expect(byId<HTMLButtonElement>('next').disabled).toBe(false);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(false);
 
     // Generating: 2xx received, no audio bytes yet.
     emitStatus({ phase: 'generating', index: 0, total: 4, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Segment 1 of 4 — Generating');
+    expect(byId('player-status').textContent).toBe('Reading');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 4 — Generating');
 
     // Buffering: audio bytes arrived / the media pipeline waits for audio.
     emitStatus({ phase: 'buffering', index: 0, total: 4, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Segment 1 of 4 — Buffering');
+    expect(byId('player-status').textContent).toBe('Reading');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 4 — Buffering');
   });
 
   it('renders a paused session and swaps the Play/Pause icon and label', () => {
     emitStatus({ phase: 'paused', index: 2, total: 5, speed: 1 });
 
-    expect(byId('player-status').textContent).toBe('Segment 3 of 5 — Paused');
-    expect(byId('player-meta').textContent).toBe('');
+    expect(byId('player-status').textContent).toBe('Paused');
+    expect(byId('player-meta').textContent).toBe('Segment 3 of 5 — Paused');
     expect(playPause().disabled).toBe(false);
     expect(iconPath(playPause())).toBe(PLAY_PATH);
     expect(playPause().getAttribute('aria-label')).toBe('Resume narration');
@@ -177,16 +183,16 @@ describe('player rendering by playback state', () => {
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
 
     emitStatus({ phase: 'complete', index: 2, total: 3, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Segment 3 of 3 — Complete');
-    expect(byId('player-meta').textContent).toBe('');
+    expect(byId('player-status').textContent).toBe('Finished');
+    expect(byId('player-meta').textContent).toBe('Segment 3 of 3 — Complete');
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(true);
   });
 
   it('renders an error session, reports the message, and recovers', () => {
     emitStatus({ phase: 'error', index: 0, total: 3, speed: 1, error: 'No API key saved.' });
 
-    expect(byId('player-status').textContent).toBe('Segment 1 of 3 — Error');
-    expect(byId('player-meta').textContent).toBe('');
+    expect(byId('player-status').textContent).toBe('Narration error');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 3 — Error');
     expect(playPause().disabled).toBe(true);
     expect(byId<HTMLButtonElement>('stop').disabled).toBe(false);
 
@@ -202,30 +208,35 @@ describe('player rendering by playback state', () => {
     expect(status.textContent).toBe('');
   });
 
-  it('maps every playback phase to a truthful indicator line', () => {
+  it('maps every playback phase to a truthful headline with no count known', () => {
     const bare: Array<[PlaybackStatus['phase'], string]> = [
       ['idle', 'No active session'],
       ['stopped', 'Stopped'],
-      ['preparing', 'Preparing'],
-      ['complete', 'Complete'],
+      ['preparing', 'Preparing narration…'],
+      ['complete', 'Finished'],
     ];
     for (const [phase, label] of bare) {
       emitStatus({ phase, index: 0, total: 0, speed: 1 });
       expect(byId('player-status').textContent).toBe(label);
+      expect(byId('player-meta').textContent).toBe('');
     }
-    const withCount: Array<[PlaybackStatus['phase'], string]> = [
-      ['preparing', 'Segment 1 of 2 — Preparing'],
-      ['connecting', 'Segment 1 of 2 — Connecting'],
-      ['generating', 'Segment 1 of 2 — Generating'],
-      ['buffering', 'Segment 1 of 2 — Buffering'],
-      ['playing', 'Segment 1 of 2 — Playing'],
-      ['paused', 'Segment 1 of 2 — Paused'],
-      ['complete', 'Segment 1 of 2 — Complete'],
-      ['error', 'Segment 1 of 2 — Error'],
+  });
+
+  it('maps every playback phase to a headline and a segment chip once a count is known', () => {
+    const withCount: Array<[PlaybackStatus['phase'], string, string]> = [
+      ['preparing', 'Preparing narration…', 'Segment 1 of 2 — Preparing'],
+      ['connecting', 'Reading', 'Segment 1 of 2 — Connecting'],
+      ['generating', 'Reading', 'Segment 1 of 2 — Generating'],
+      ['buffering', 'Reading', 'Segment 1 of 2 — Buffering'],
+      ['playing', 'Reading', 'Segment 1 of 2 — Playing'],
+      ['paused', 'Paused', 'Segment 1 of 2 — Paused'],
+      ['complete', 'Finished', 'Segment 1 of 2 — Complete'],
+      ['error', 'Narration error', 'Segment 1 of 2 — Error'],
     ];
-    for (const [phase, label] of withCount) {
+    for (const [phase, headline, chip] of withCount) {
       emitStatus({ phase, index: 0, total: 2, speed: 1 });
-      expect(byId('player-status').textContent).toBe(label);
+      expect(byId('player-status').textContent).toBe(headline);
+      expect(byId('player-meta').textContent).toBe(chip);
     }
   });
 });
@@ -234,29 +245,29 @@ describe('starting narration', () => {
   it('Read page sends READ_PAGE and tracks the source through to playing', async () => {
     byId<HTMLButtonElement>('read-page').click();
     expect(sentMessages).toContainEqual({ target: 'service-worker', type: 'READ_PAGE' });
-    expect(byId('player-status').textContent).toBe('Preparing');
-    expect(byId('player-meta').textContent).toBe('Preparing page…');
+    expect(byId('player-status').textContent).toBe('Preparing page…');
+    expect(byId('player-meta').textContent).toBe('');
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     emitStatus({ phase: 'preparing', index: 0, total: 0, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Preparing');
-    expect(byId('player-meta').textContent).toBe('Preparing page…');
+    expect(byId('player-status').textContent).toBe('Preparing page…');
+    expect(byId('player-meta').textContent).toBe('');
 
     emitStatus({ phase: 'playing', index: 0, total: 3, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Segment 1 of 3 — Playing');
-    expect(byId('player-meta').textContent).toBe('Reading page');
+    expect(byId('player-status').textContent).toBe('Reading page');
+    expect(byId('player-meta').textContent).toBe('Segment 1 of 3 — Playing');
   });
 
   it('Read selection sends READ_SELECTION and tracks its own source', async () => {
     byId<HTMLButtonElement>('read-selection').click();
     expect(sentMessages).toContainEqual({ target: 'service-worker', type: 'READ_SELECTION' });
-    expect(byId('player-status').textContent).toBe('Preparing');
-    expect(byId('player-meta').textContent).toBe('Preparing selection…');
+    expect(byId('player-status').textContent).toBe('Preparing selection…');
+    expect(byId('player-meta').textContent).toBe('');
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     emitStatus({ phase: 'playing', index: 1, total: 4, speed: 1 });
-    expect(byId('player-status').textContent).toBe('Segment 2 of 4 — Playing');
-    expect(byId('player-meta').textContent).toBe('Reading selection');
+    expect(byId('player-status').textContent).toBe('Reading selection');
+    expect(byId('player-meta').textContent).toBe('Segment 2 of 4 — Playing');
   });
 
   it('shows a success confirmation after narration starts', async () => {
@@ -281,6 +292,58 @@ describe('transport click wiring', () => {
       { target: 'service-worker', type: 'NEXT' },
       { target: 'service-worker', type: 'STOP' },
     ]);
+  });
+});
+
+describe('views and navigation', () => {
+  afterEach(() => {
+    // Leave Listen selected so later describe blocks see the default tab.
+    byId<HTMLButtonElement>('tab-listen').click();
+  });
+
+  it('Help & Privacy returns to whichever app tab was active when it opened', () => {
+    byId<HTMLButtonElement>('tab-settings').click();
+    expect(byId<HTMLButtonElement>('tab-settings').getAttribute('aria-selected')).toBe('true');
+
+    byId<HTMLButtonElement>('open-help').click();
+    expect(byId('view-help').hasAttribute('hidden')).toBe(false);
+    expect(byId('view-app').hasAttribute('hidden')).toBe(true);
+
+    byId<HTMLButtonElement>('close-help').click();
+    expect(byId('view-app').hasAttribute('hidden')).toBe(false);
+    expect(byId('view-help').hasAttribute('hidden')).toBe(true);
+    expect(byId<HTMLButtonElement>('tab-settings').getAttribute('aria-selected')).toBe('true');
+    expect(byId<HTMLButtonElement>('tab-listen').getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('moves focus into Help on open and back to the Help icon on close', () => {
+    byId<HTMLButtonElement>('open-help').click();
+    expect(document.activeElement?.id).toBe('close-help');
+
+    byId<HTMLButtonElement>('close-help').click();
+    expect(document.activeElement?.id).toBe('open-help');
+  });
+});
+
+describe('progress bar', () => {
+  it('stays hidden until the transport is navigable, then tracks segment completion', () => {
+    const track = byId<HTMLDivElement>('progress-track');
+
+    emitStatus({ phase: 'preparing', index: 0, total: 0, speed: 1 });
+    expect(track.hidden).toBe(true);
+
+    emitStatus({ phase: 'connecting', index: 0, total: 4, speed: 1 });
+    expect(track.hidden).toBe(false);
+    expect(track.getAttribute('aria-valuenow')).toBe('0');
+
+    // Playing counts its current segment as half-complete: (1 + 0.5) / 4 = 37.5%.
+    emitStatus({ phase: 'playing', index: 1, total: 4, speed: 1 });
+    expect(track.hidden).toBe(false);
+    expect(track.getAttribute('aria-valuenow')).toBe('38');
+
+    // Complete is not a navigable phase, so the transport-tied progress bar hides again.
+    emitStatus({ phase: 'complete', index: 3, total: 4, speed: 1 });
+    expect(track.hidden).toBe(true);
   });
 });
 
@@ -326,12 +389,12 @@ describe('accessible names, tooltips, and structure', () => {
     const buttons = [...panel.querySelectorAll('button')];
     expect(buttons.every((button) => button instanceof HTMLButtonElement)).toBe(true);
     expect(buttons.map((button) => button.id)).toEqual([
-      'read-page',
-      'read-selection',
       'prev',
       'play-pause',
       'next',
       'stop',
+      'read-page',
+      'read-selection',
     ]);
   });
 
@@ -352,5 +415,61 @@ describe('tooltip presentation', () => {
     expect(css).toMatch(/button\[data-tooltip\]:focus::after/);
     expect(css).toMatch(/pointer-events:\s*none/);
     expect(css).toMatch(/button\[data-tooltip\]:disabled::after/);
+  });
+});
+
+// This block re-imports the controller against a fresh document and a stateful
+// chrome stub, since the onboarding → app transition depends on hasApiKey
+// flipping between two GET_SETTINGS responses — something the shared fixture
+// above (a fixed, always-configured settings response) cannot exercise. It
+// runs last so it does not disturb the shared DOM/module state the earlier
+// describe blocks depend on.
+describe('onboarding to app transition', () => {
+  it('starts on onboarding, saves a key, and switches to the app view with focus moved', async () => {
+    let hasKey = false;
+    const listeners: RuntimeListener[] = [];
+    const stub = {
+      runtime: {
+        sendMessage: vi.fn((message: unknown): Promise<unknown> => {
+          switch (messageType(message)) {
+            case 'GET_SETTINGS':
+              return Promise.resolve({
+                settings: { hasApiKey: hasKey, voiceId: '', model: 's2.1-pro-free', speed: 1, mood: 'none' },
+              });
+            case 'GET_STATUS':
+              return Promise.resolve({ status: createIdleStatus() });
+            case 'SAVE_SETTINGS':
+              hasKey = true;
+              return Promise.resolve({});
+            default:
+              return Promise.resolve(undefined);
+          }
+        }),
+        onMessage: {
+          addListener: (listener: RuntimeListener) => {
+            listeners.push(listener);
+          },
+        },
+        getManifest: () => ({ version: '1.0.0' }),
+      },
+    };
+
+    vi.resetModules();
+    vi.stubGlobal('chrome', stub);
+    document.body.innerHTML = popupBodyHtml();
+    await import('./popup');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(byId('view-onboarding').hasAttribute('hidden')).toBe(false);
+    expect(byId('view-app').hasAttribute('hidden')).toBe(true);
+    expect(document.activeElement?.id).toBe('onboarding-api-key');
+
+    byId<HTMLInputElement>('onboarding-api-key').value = 'sk-test-key';
+    byId<HTMLButtonElement>('onboarding-save-key').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(byId('view-onboarding').hasAttribute('hidden')).toBe(true);
+    expect(byId('view-app').hasAttribute('hidden')).toBe(false);
+    expect(document.activeElement?.id).toBe('open-help');
   });
 });
